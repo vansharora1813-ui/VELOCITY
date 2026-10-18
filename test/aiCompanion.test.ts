@@ -312,5 +312,44 @@ describe('AI Companions & Provider Integration', () => {
       assert.notStrictEqual(evaluation.status, 'verified');
       assert.strictEqual(evaluation.status, 'unknown');
     });
+
+    it('handles provider abort timeout gracefully with useful error', async () => {
+      const abortingFetch = async () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+      };
+
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key' },
+        abortingFetch as unknown as typeof fetch
+      );
+
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.code, 'PROVIDER_ERROR');
+      assert.match(res.error!, /timed out/i);
+    });
+
+    it('handles provider malformed JSON text honestly without inventing dialogue', async () => {
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: 'This is not JSON at all' }] } }],
+          }),
+          { status: 200 }
+        );
+
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key' },
+        mockFetch as unknown as typeof fetch
+      );
+
+      assert.strictEqual(res.success, true);
+      assert.match(res.error!, /Warning: Malformed JSON received/i);
+      assert.strictEqual(res.replies?.[0].text, 'This is not JSON at all');
+    });
   });
 });
+

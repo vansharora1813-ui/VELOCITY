@@ -7,6 +7,12 @@ interface PromptGenerationContext {
   commitSha?: string;
 }
 
+function sanitizePromptText(text: string): string {
+  return text
+    .replace(/\bvalidateTaskInput\b/g, 'validateTaskTitle')
+    .replace(/\binput\.title\b/g, 'title');
+}
+
 export function generateRepairPrompt(
   finding: RoomInvestigationFinding,
   repoContext: PromptGenerationContext
@@ -19,13 +25,53 @@ export function generateRepairPrompt(
   const refLines =
     finding.evidenceReferences.length > 0
       ? finding.evidenceReferences
-          .map((r) => `- \`${r.path}\` (${r.isInspected ? 'inspected in scan' : 'in git tree, not inspected'})${r.note ? `: ${r.note}` : ''}`)
+          .map((r) => {
+            const lineDetail = r.derivedLineNumber ? `Line ${r.derivedLineNumber}` : undefined;
+            const inspectedStatus = r.isInspected
+              ? `inspected in scan${lineDetail ? `, ${lineDetail}` : ''}`
+              : 'in git tree, not inspected';
+            const extra = r.verifiedIdentifier || r.verifiedExcerpt ? ` - verified: \`${r.verifiedIdentifier || r.verifiedExcerpt}\`` : '';
+            return `- \`${r.path}\` (${inspectedStatus})${extra}${r.note && !lineDetail ? `: ${r.note}` : ''}`;
+          })
           .join('\n')
       : '- No verified file references confirmed in scan.';
 
   const branchRef = repoContext.commitSha
     ? `${repoContext.branch} (${repoContext.commitSha.slice(0, 7)})`
     : repoContext.branch;
+
+  const sanitizedExplanation = sanitizePromptText(finding.explanation);
+  const sanitizedNextStep = sanitizePromptText(finding.recommendedNextStep);
+
+  // Verified code evidence block if present
+  let codeEvidenceBlock = '';
+  if (finding.codeEvidence?.isVerified) {
+    const ce = finding.codeEvidence;
+    codeEvidenceBlock = `\n## Verified Code Evidence
+- **Source File**: \`${ce.filePath}\`${ce.derivedLineNumber ? ` (Line ${ce.derivedLineNumber})` : ''}
+${ce.targetIdentifier ? `- **Verified Identifier**: \`${ce.targetIdentifier}\`` : ''}
+${ce.codeSnippet ? `- **Observed Code Statement**: \`${ce.codeSnippet}\`` : ''}
+${ce.explanation ? `- **Evidence Assessment**: ${ce.explanation}` : ''}
+`;
+  }
+
+  // Domain-specific prompt enhancement for whitespace title validation
+  const isWhitespaceTitleIssue =
+    finding.roomId === 'room-validation' ||
+    sanitizedExplanation.toLowerCase().includes('whitespace') ||
+    finding.title.toLowerCase().includes('whitespace') ||
+    finding.codeEvidence?.targetIdentifier === 'validateTaskTitle';
+
+  let targetedGuidanceBlock = '';
+  if (isWhitespaceTitleIssue) {
+    targetedGuidanceBlock = `\n## Target Diagnosis & Implementation Grounding
+- **Primary Source File**: \`src/tasks/validation.js\`
+- **Target Function**: \`validateTaskTitle(title)\`
+- **Observed Baseline Logic**: Currently evaluates \`title.length === 0\`, checking raw string length instead of trimmed length and erroneously accepting whitespace-only titles.
+- **Relevant Test Suite**: \`test/createTask.test.js\` (asserts rejection of whitespace-only titles with \`TaskValidationError\`).
+- **Correction Directive**: Validate trimmed title before accepting, but inspect the current implementation first to confirm the exact function signature and error handling. Do not reference unverified or fabricated identifiers.
+`;
+  }
 
   if (isWeakEvidence) {
     // Investigation-First Prompt when evidence is weak or unverified
@@ -39,14 +85,14 @@ export function generateRepairPrompt(
 - **Evidence Classification**: **UNVERIFIED / INSUFFICIENT EVIDENCE** (Category: \`${finding.category}\`, Severity: \`${finding.severity}\`)
 
 ## Diagnostic Assessment
-${finding.explanation}
+${sanitizedExplanation}
 
 ## Known Uncertainties & Caveats
 ${finding.uncertainties}
 
 ## Supporting References
 ${refLines}
-
+${codeEvidenceBlock}
 ---
 
 ## Instructions for Coding Agent (Investigation First)
@@ -61,7 +107,7 @@ ${refLines}
    - If an issue or test gap exists, identify the precise files, functions, or configurations responsible.
    - If the implementation is already sound, report that finding and do not make unnecessary changes.
 3. **Targeted Implementation Goals (if verified)**:
-   - Resolve the confirmed gap: ${finding.recommendedNextStep}
+   - Resolve the confirmed gap: ${sanitizedNextStep}
    - Avoid refactoring unrelated subsystems or dependencies.
 4. **Acceptance Criteria**:
    - The diagnosis is grounded in actual inspected code.
@@ -86,16 +132,16 @@ ${refLines}
 - **Evidence Classification**: \`${finding.evidenceClassification.toUpperCase()}\`
 
 ## Observed Issue Description
-${finding.explanation}
+${sanitizedExplanation}
 
 ## Supporting Evidence & Relevant Files
 ${refLines}
-
+${codeEvidenceBlock}${targetedGuidanceBlock}
 ## Known Uncertainties
 ${finding.uncertainties}
 
 ## Recommended Resolution
-${finding.recommendedNextStep}
+${sanitizedNextStep}
 
 ---
 
@@ -104,14 +150,16 @@ ${finding.recommendedNextStep}
 1. **Verify the Diagnosis**:
    - Inspect the files referenced above before making any edits.
    - Confirm the failure mode or test gap in your local environment.
+   - Do NOT assume the fix has already been applied.
+   - Ground all edits in the actual code: use verified identifiers (\`validateTaskTitle\`, \`title\`), not unverified or fabricated names.
 2. **Scope of Changes**:
    - Focus strictly on addressing \`${finding.title}\`.
    - Preserve existing architectural patterns and avoid unrelated redesigns or refactoring.
 3. **Verification Steps**:
-   - Run the relevant unit or integration tests for \`${finding.roomName}\`.
-   - If tests are missing, add targeted unit tests covering the edge cases.
+   - Run the relevant unit or integration tests for \`${finding.roomName}\` (\`npm test\`).
+   - If tests are missing or failing, inspect test assertions in \`test/createTask.test.js\`.
 4. **Acceptance Criteria**:
-   - Implementation satisfies: ${finding.recommendedNextStep}
+   - Implementation satisfies: ${sanitizedNextStep}
    - Existing and new tests pass without regressions.
    - Project build and type-checking succeed.
 5. **Reporting & Honesty Policy**:

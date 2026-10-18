@@ -18,6 +18,18 @@ export interface ValidatedEvidenceRef {
   isInspected: boolean;
   githubUrl?: string;
   note?: string;
+  verifiedExcerpt?: string;
+  verifiedIdentifier?: string;
+  derivedLineNumber?: number;
+}
+
+export interface ValidatedCodeEvidence {
+  filePath: string;
+  targetIdentifier?: string;
+  codeSnippet?: string;
+  derivedLineNumber?: number;
+  isVerified: boolean;
+  explanation?: string;
 }
 
 export interface RoomInvestigationFinding {
@@ -30,6 +42,7 @@ export interface RoomInvestigationFinding {
   evidenceClassification: EvidenceClassification;
   evidenceReferences: ValidatedEvidenceRef[];
   rejectedReferences?: string[];
+  codeEvidence?: ValidatedCodeEvidence;
   recommendedNextStep: string;
   uncertainties: string;
   companionMessages: CompanionReplyMessage[];
@@ -42,15 +55,28 @@ export interface InvestigateApiRequest {
   roomLayer: string;
   roomStatus: string;
   roomEvidence: string;
+  roomFilePaths?: string[];
   repoContext: {
     owner: string;
     repo: string;
     branch: string;
     commitSha?: string;
-    inspectedFiles: Array<{ path: string; category: string; contentExcerpt?: string }>;
+    inspectedFiles: Array<{
+      path: string;
+      category: string;
+      contentExcerpt?: string;
+      sizeBytes?: number;
+    }>;
     discoveredFilePaths?: string[];
     detectedTechnologies: string[];
     dependencies?: string[];
+    ciEvaluation?: {
+      status: string;
+      isVerified: boolean;
+      reason: string;
+      checkRunsCount: number;
+      failedChecks: string[];
+    };
   };
 }
 

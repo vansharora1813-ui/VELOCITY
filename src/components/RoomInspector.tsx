@@ -70,9 +70,27 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
             path: f.path,
             category: f.category,
             contentExcerpt: f.contentExcerpt,
+            sizeBytes: f.sizeBytes,
           })),
           discoveredFilePaths: scanResult.discoveredFilePaths || scanResult.inspectedFiles.map((f) => f.path),
           detectedTechnologies: scanResult.detectedTechnologies,
+          dependencies: room.dependencies,
+          ciEvaluation: scanResult.ciEvaluation
+            ? {
+                status:
+                  scanResult.ciEvaluation.outcome === 'failed'
+                    ? 'failing'
+                    : scanResult.ciEvaluation.outcome === 'verified'
+                    ? 'passing'
+                    : 'inconclusive',
+                isVerified: scanResult.ciEvaluation.outcome === 'verified',
+                reason: scanResult.ciEvaluation.outcomeReason,
+                checkRunsCount: scanResult.ciEvaluation.relevantTestChecks.length,
+                failedChecks: scanResult.ciEvaluation.relevantTestChecks
+                  .filter((c) => c.conclusion === 'failure' || c.conclusion === 'timed_out')
+                  .map((c) => c.name),
+              }
+            : undefined,
         }
       : {
           owner: 'example',
@@ -103,6 +121,7 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
           roomLayer: room.layer,
           roomStatus: room.status,
           roomEvidence: room.evidence,
+          roomFilePaths: room.filePaths,
           repoContext,
         }),
       });

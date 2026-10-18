@@ -132,7 +132,7 @@ export async function executeAiChat(
     contents: conversationContents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 800,
+      maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       responseSchema: {
         type: 'ARRAY',

@@ -3,10 +3,12 @@ import { handleChatApiRequest } from './chatHandler.ts';
 import { handleInvestigateApiRequest } from './investigateHandler.ts';
 import { handleHealthApiRequest } from './healthHandler.ts';
 
-export function vitePluginAiChat(): Plugin {
+export function vitePluginAiChat(env?: Record<string, string | undefined>): Plugin {
   const attachMiddleware = (server: ViteDevServer | PreviewServer) => {
+    const activeEnv = { ...process.env, ...env };
+
     server.middlewares.use('/api/health', (req, res) => {
-      handleHealthApiRequest(req, res).catch((err) => {
+      handleHealthApiRequest(req, res, activeEnv).catch((err) => {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ success: false, error: (err as Error).message }));
@@ -14,7 +16,7 @@ export function vitePluginAiChat(): Plugin {
     });
 
     server.middlewares.use('/api/chat', (req, res) => {
-      handleChatApiRequest(req, res).catch((err) => {
+      handleChatApiRequest(req, res, activeEnv).catch((err) => {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ success: false, error: (err as Error).message }));
@@ -22,7 +24,7 @@ export function vitePluginAiChat(): Plugin {
     });
 
     server.middlewares.use('/api/investigate', (req, res) => {
-      handleInvestigateApiRequest(req, res).catch((err) => {
+      handleInvestigateApiRequest(req, res, activeEnv).catch((err) => {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ success: false, error: (err as Error).message }));

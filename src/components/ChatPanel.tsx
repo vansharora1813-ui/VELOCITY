@@ -107,37 +107,80 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           owner: scanResult.owner,
           repo: scanResult.repo,
           branch: scanResult.metadata?.defaultBranch || 'main',
+          commitSha: scanResult.commitSha,
           totalFiles: scanResult.totalFilesDiscovered,
           inspectedFiles: scanResult.inspectedFiles.map((f) => ({
             path: f.path,
             category: f.category,
+            contentExcerpt: f.contentExcerpt,
+            sizeBytes: f.sizeBytes,
           })),
+          discoveredFilePaths: scanResult.discoveredFilePaths || scanResult.inspectedFiles.map((f) => f.path),
           detectedTechnologies: scanResult.detectedTechnologies,
           roomSummaries: rooms.map((r) => ({
             id: r.id,
             name: r.name,
+            layer: r.layer,
             status: r.status,
             evidence: r.evidence,
+            filePaths: r.filePaths,
+            ciStatus: r.metrics?.ciStatus,
+            ciCheckName: r.metrics?.ciCheckName,
           })),
+          ciEvaluation: scanResult.ciEvaluation
+            ? {
+                status:
+                  scanResult.ciEvaluation.outcome === 'failed'
+                    ? 'failing'
+                    : scanResult.ciEvaluation.outcome === 'verified'
+                    ? 'passing'
+                    : 'inconclusive',
+                isVerified: scanResult.ciEvaluation.outcome === 'verified',
+                reason: scanResult.ciEvaluation.outcomeReason,
+                checkRunsCount: scanResult.ciEvaluation.relevantTestChecks.length,
+                failedChecks: scanResult.ciEvaluation.relevantTestChecks
+                  .filter((c) => c.conclusion === 'failure' || c.conclusion === 'timed_out')
+                  .map((c) => c.name),
+              }
+            : undefined,
         }
-      : {
+      : isSampleActive
+      ? {
           owner: 'example',
           repo: 'booknook-demo',
           branch: 'main',
           totalFiles: 42,
           inspectedFiles: [
-            { path: 'src/auth/jwt.ts', category: 'source' },
-            { path: 'src/catalog/books.ts', category: 'source' },
-            { path: 'tests/auth.test.ts', category: 'test' },
+            {
+              path: 'src/auth/jwt.ts',
+              category: 'source',
+              contentExcerpt: 'export function signToken(user: User): string { ... }',
+            },
+            {
+              path: 'src/catalog/books.ts',
+              category: 'source',
+              contentExcerpt: 'export const getBooks = () => { return []; }',
+            },
+            {
+              path: 'tests/auth.test.ts',
+              category: 'test',
+              contentExcerpt: 'describe("JWT authentication", () => { ... })',
+            },
           ],
+          discoveredFilePaths: ['src/auth/jwt.ts', 'src/catalog/books.ts', 'tests/auth.test.ts'],
           detectedTechnologies: ['TypeScript', 'React', 'PostgreSQL', 'Docker'],
           roomSummaries: rooms.map((r) => ({
             id: r.id,
             name: r.name,
+            layer: r.layer,
             status: r.status,
             evidence: r.evidence,
+            filePaths: r.filePaths,
+            ciStatus: r.metrics?.ciStatus,
+            ciCheckName: r.metrics?.ciCheckName,
           })),
-        };
+        }
+      : undefined;
 
     // Format bounded history
     const historyPayload = newMessages

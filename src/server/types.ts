@@ -26,10 +26,33 @@ export interface ChatApiRequest {
     owner: string;
     repo: string;
     branch: string;
+    commitSha?: string;
     totalFiles: number;
-    inspectedFiles: Array<{ path: string; category: string }>;
+    inspectedFiles: Array<{
+      path: string;
+      category: string;
+      contentExcerpt?: string;
+      sizeBytes?: number;
+    }>;
+    discoveredFilePaths?: string[];
     detectedTechnologies: string[];
-    roomSummaries: Array<{ id: string; name: string; status: string; evidence: string }>;
+    roomSummaries: Array<{
+      id: string;
+      name: string;
+      layer?: string;
+      status: string;
+      evidence: string;
+      filePaths?: string[];
+      ciStatus?: string;
+      ciCheckName?: string;
+    }>;
+    ciEvaluation?: {
+      status: string;
+      isVerified: boolean;
+      reason: string;
+      checkRunsCount: number;
+      failedChecks: string[];
+    };
   };
 }
 
