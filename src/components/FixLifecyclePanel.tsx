@@ -13,6 +13,8 @@ interface FixLifecyclePanelProps {
   scanResult: GitHubScanResult | null;
   isSampleActive: boolean;
   onRoomUpdated?: (updatedRoom: ArchitecturalRoom) => void;
+  savedLifecycleState?: FixLifecycleState | null;
+  onLifecycleChange?: (state: FixLifecycleState | null) => void;
 }
 
 export const FixLifecyclePanel: React.FC<FixLifecyclePanelProps> = ({
@@ -21,6 +23,8 @@ export const FixLifecyclePanel: React.FC<FixLifecyclePanelProps> = ({
   scanResult,
   isSampleActive,
   onRoomUpdated,
+  savedLifecycleState,
+  onLifecycleChange,
 }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [summary, setSummary] = useState('');
@@ -29,7 +33,9 @@ export const FixLifecyclePanel: React.FC<FixLifecyclePanelProps> = ({
   const [testOutput, setTestOutput] = useState('');
   const [isReinspecting, setIsReinspecting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [lifecycleState, setLifecycleState] = useState<FixLifecycleState | null>(null);
+  const [lifecycleState, setLifecycleState] = useState<FixLifecycleState | null>(
+    savedLifecycleState || null
+  );
 
   const handleRunReinspection = async (reportToUse?: UserFixReport) => {
     if (isSampleActive || !scanResult) {
@@ -90,6 +96,7 @@ export const FixLifecyclePanel: React.FC<FixLifecyclePanelProps> = ({
       );
 
       setLifecycleState(result);
+      onLifecycleChange?.(result);
 
       if (result.resultingStatusEvaluation && onRoomUpdated) {
         onRoomUpdated({

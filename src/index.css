@@ -1014,6 +1014,114 @@ html, body, #root {
   background: #483E52;
 }
 
+/* Recent Projects Selector & Refresh (T13) */
+.recent-projects-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 6px 2px 10px;
+}
+
+.recent-projects-label {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.recent-projects-dropdown {
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  outline: none;
+  cursor: pointer;
+  max-width: 280px;
+}
+
+.recent-projects-dropdown option {
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+}
+
+.btn-delete-recent {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.btn-delete-recent:hover {
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+}
+
+.btn-refresh-repo {
+  padding: 6px 12px;
+  background: #3B3A36;
+  border: 1px solid #635F57;
+  border-radius: 4px;
+  color: #E6E1D8;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.btn-refresh-repo:hover:not(:disabled) {
+  background: #4A4843;
+  border-color: #8C867B;
+}
+
+.btn-refresh-repo.highlight-refresh {
+  border-color: var(--status-progress);
+  color: #FFE6A3;
+  background: #423820;
+}
+
+.btn-refresh-repo.highlight-refresh:hover:not(:disabled) {
+  background: #544728;
+}
+
+.repo-help-status-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.saved-data-indicator {
+  color: #D4A86A;
+  background: rgba(212, 168, 106, 0.12);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  border: 1px solid rgba(212, 168, 106, 0.3);
+}
+
+.status-badge.saved-repo {
+  border-color: #D4A86A;
+  background: rgba(212, 168, 106, 0.08);
+}
+
+.status-indicator-dot.saved {
+  background-color: #D4A86A;
+}
+
+.commit-tag {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
 .repo-connect-help {
   display: flex;
   align-items: center;

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { GitHubScanResult, ScanStage } from '../domain/github/types.ts';
 import { scanGitHubRepository } from '../domain/github/scanner.ts';
+import type { WorkspaceSummary } from '../domain/workspace/types.ts';
 
 interface RepoConnectBarProps {
   onScanComplete: (result: GitHubScanResult) => void;
@@ -8,6 +9,11 @@ interface RepoConnectBarProps {
   isSampleActive: boolean;
   onOpenDetails: () => void;
   lastScanResult: GitHubScanResult | null;
+  recentProjects?: WorkspaceSummary[];
+  activeWorkspaceId?: string | null;
+  onSelectRecentProject?: (id: string) => void;
+  onDeleteRecentProject?: (id: string) => void;
+  isSavedData?: boolean;
 }
 
 export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
@@ -16,23 +22,25 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
   isSampleActive,
   onOpenDetails,
   lastScanResult,
+  recentProjects = [],
+  activeWorkspaceId,
+  onSelectRecentProject,
+  onDeleteRecentProject,
+  isSavedData = false,
 }) => {
   const [urlInput, setUrlInput] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [stageMessage, setStageMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!urlInput.trim()) return;
-
+  const performScan = async (repoUrl: string, isRefresh = false) => {
     setErrorMessage(null);
     setIsScanning(true);
-    setStageMessage('Initiating scan...');
+    setStageMessage(isRefresh ? 'Checking GitHub for updates...' : 'Initiating scan...');
 
     try {
       const result = await scanGitHubRepository(
-        urlInput,
+        repoUrl,
         { maxFilesToInspect: 12 },
         (_stage: ScanStage, msg: string) => {
           setStageMessage(msg);
@@ -40,16 +48,46 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
       );
 
       if (!result.success) {
-        setErrorMessage(result.error || 'Repository scan failed.');
+        if (isRefresh) {
+          setErrorMessage(`Refresh failed: ${result.error || 'Unable to fetch newer commit'}. Preserving saved scan.`);
+        } else {
+          setErrorMessage(result.error || 'Repository scan failed.');
+        }
       } else {
         onScanComplete(result);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown error during scan';
-      setErrorMessage(msg);
+      if (isRefresh) {
+        setErrorMessage(`Refresh failed: ${msg}. Preserving saved scan.`);
+      } else {
+        setErrorMessage(msg);
+      }
     } finally {
       setIsScanning(false);
       setStageMessage('');
+    }
+  };
+
+  const handleScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!urlInput.trim()) return;
+    await performScan(urlInput.trim(), false);
+  };
+
+  const handleRefresh = async () => {
+    if (!lastScanResult?.owner || !lastScanResult?.repo) return;
+    const repoUrl = `https://github.com/${lastScanResult.owner}/${lastScanResult.repo}`;
+    await performScan(repoUrl, true);
+  };
+
+  const formatScannedTime = (iso?: string) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
     }
   };
 
@@ -78,6 +116,66 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
           </button>
         </div>
 
+        {/* Compact Recent Projects Selector */}
+        {recentProjects.length > 0 && (
+          <div className="recent-projects-selector" role="group" aria-label="Recent Projects">
+            <label htmlFor="recent-projects-select" className="recent-projects-label">
+              Recent:
+            </label>
+            <select
+              id="recent-projects-select"
+              className="recent-projects-dropdown"
+              value={!isSampleActive && activeWorkspaceId ? activeWorkspaceId : ''}
+              onChange={(e) => {
+                const targetId = e.target.value;
+                if (targetId && onSelectRecentProject) {
+                  onSelectRecentProject(targetId);
+                }
+              }}
+              disabled={isScanning}
+              aria-label="Select from previously scanned workspaces"
+            >
+              <option value="">-- Recent Projects ({recentProjects.length}) --</option>
+              {recentProjects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id} (@{p.commitSha.slice(0, 7)}) · {formatScannedTime(p.scannedAt)}
+                  {p.ciStatus === 'failing' ? ' [CI ✕]' : p.ciStatus === 'passing' ? ' [CI ✓]' : ''}
+                </option>
+              ))}
+            </select>
+
+            {!isSampleActive && activeWorkspaceId && onDeleteRecentProject && (
+              <button
+                type="button"
+                className="btn-delete-recent"
+                onClick={() => onDeleteRecentProject(activeWorkspaceId)}
+                title="Remove current workspace from local saved history"
+                disabled={isScanning}
+                aria-label={`Remove ${activeWorkspaceId} from history`}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Refresh / Rescan Button for active real repo */}
+        {!isSampleActive && lastScanResult && (
+          <button
+            type="button"
+            className={`btn-refresh-repo ${isSavedData ? 'highlight-refresh' : ''}`}
+            onClick={handleRefresh}
+            disabled={isScanning}
+            title={
+              isSavedData
+                ? 'Check GitHub for newer commits and updated CI check runs'
+                : 'Rescan repository to refresh commit and check runs'
+            }
+          >
+            {isScanning ? 'Refreshing...' : isSavedData ? '🔄 Refresh from GitHub' : '🔄 Rescan'}
+          </button>
+        )}
+
         {!isSampleActive && (
           <button
             type="button"
@@ -86,7 +184,7 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
             disabled={isScanning}
             title="Switch back to BookNook demonstration dataset"
           >
-            Reset to Sample Data (BookNook)
+            Reset to Sample Data
           </button>
         )}
 
@@ -97,14 +195,21 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
             onClick={onOpenDetails}
             title="Inspect scan coverage and files inspected"
           >
-            View Scan Telemetry ({lastScanResult.inspectedFiles.length} files)
+            Scan Telemetry ({lastScanResult.inspectedFiles.length} files)
           </button>
         )}
       </form>
 
-      {/* Helper text explaining limitations */}
+      {/* Helper text and status */}
       <div className="repo-connect-help">
-        <span>Public repositories only · GitHub API rate limit: 60 req/hr · Bounded to 12 representative files</span>
+        <div className="repo-help-status-line">
+          <span>Public repositories only · GitHub API rate limit: 60 req/hr · Bounded to 12 files</span>
+          {isSavedData && lastScanResult && (
+            <span className="saved-data-indicator" role="status">
+              💾 Saved scan (@{lastScanResult.commitSha ? lastScanResult.commitSha.slice(0, 7) : 'unknown'} · {formatScannedTime(lastScanResult.scannedAt)}) · Unverified against latest remote until refreshed
+            </span>
+          )}
+        </div>
         {isScanning && <span className="scan-progress-indicator">⚡ {stageMessage}</span>}
       </div>
 

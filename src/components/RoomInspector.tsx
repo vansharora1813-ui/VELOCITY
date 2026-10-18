@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { ArchitecturalRoom } from '../types.ts';
 import type { GitHubScanResult } from '../domain/github/types.ts';
 import type { RoomInvestigationFinding } from '../domain/investigation/types.ts';
+import type { FixLifecycleState } from '../domain/lifecycle/types.ts';
 import { PixelPetAvatar } from './PixelPetAvatar.tsx';
 import { FixLifecyclePanel } from './FixLifecyclePanel.tsx';
 
@@ -11,6 +12,10 @@ interface RoomInspectorProps {
   scanResult: GitHubScanResult | null;
   isSampleActive: boolean;
   onRoomUpdated?: (updatedRoom: ArchitecturalRoom) => void;
+  savedFinding?: RoomInvestigationFinding | null;
+  onFindingChange?: (roomId: string, finding: RoomInvestigationFinding | null) => void;
+  savedLifecycleState?: FixLifecycleState | null;
+  onLifecycleChange?: (roomId: string, state: FixLifecycleState | null) => void;
 }
 
 export const RoomInspector: React.FC<RoomInspectorProps> = ({
@@ -19,22 +24,26 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
   scanResult,
   isSampleActive,
   onRoomUpdated,
+  savedFinding,
+  onFindingChange,
+  savedLifecycleState,
+  onLifecycleChange,
 }) => {
   const [isInvestigating, setIsInvestigating] = useState(false);
-  const [finding, setFinding] = useState<RoomInvestigationFinding | null>(null);
+  const [finding, setFinding] = useState<RoomInvestigationFinding | null>(savedFinding || null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [setupRequired, setSetupRequired] = useState(false);
-  const [showPrompt, setShowPrompt] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(Boolean(savedFinding?.generatedPrompt));
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Clear investigation and prompt state when switching rooms, repository, or scanned commit
+  // Restore or clear investigation and prompt state when switching rooms, repository, or scanned commit
   useEffect(() => {
-    setFinding(null);
+    setFinding(savedFinding || null);
     setErrorMessage(null);
     setSetupRequired(false);
-    setShowPrompt(false);
+    setShowPrompt(Boolean(savedFinding?.generatedPrompt));
     setCopySuccess(false);
-  }, [room?.id, scanResult?.owner, scanResult?.repo, scanResult?.commitSha, isSampleActive]);
+  }, [room?.id, scanResult?.owner, scanResult?.repo, scanResult?.commitSha, isSampleActive, savedFinding]);
 
   if (!room) return null;
 
@@ -137,7 +146,11 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
         return;
       }
 
-      setFinding(data.finding || null);
+      const newFinding = data.finding || null;
+      setFinding(newFinding);
+      if (room?.id && onFindingChange) {
+        onFindingChange(room.id, newFinding);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network failure';
       setErrorMessage(`Investigation request failed: ${msg}`);
@@ -463,6 +476,8 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
             scanResult={scanResult}
             isSampleActive={isSampleActive}
             onRoomUpdated={onRoomUpdated}
+            savedLifecycleState={savedLifecycleState}
+            onLifecycleChange={(state) => room && onLifecycleChange?.(room.id, state)}
           />
         </div>
       )}

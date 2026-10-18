@@ -413,6 +413,7 @@ export async function scanGitHubRepository(
     repo,
     metadata,
     commitSha,
+    scannedAt: new Date().toISOString(),
     checkRuns,
     ciEvaluation,
     treeTruncated: isTruncated,

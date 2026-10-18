@@ -17,6 +17,8 @@ interface ChatPanelProps {
   scanResult: GitHubScanResult | null;
   isSampleActive: boolean;
   rooms: ArchitecturalRoom[];
+  initialMessages?: ChatMessageItem[];
+  onMessagesChange?: (messages: ChatMessageItem[]) => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -24,21 +26,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   scanResult,
   isSampleActive,
   rooms,
+  initialMessages,
+  onMessagesChange,
 }) => {
-  const [messages, setMessages] = useState<ChatMessageItem[]>([
-    {
-      id: 'init-dog',
-      sender: 'dog',
-      text: "Woof! I'm Barkley! Ask me anything about this repository's architecture, dependencies, or the rooms in the house!",
-      timestamp: 'Ready',
-    },
-    {
-      id: 'init-cat',
-      sender: 'cat',
-      text: "And I'm Cleo. I keep Barkley honest. I only accept real verified tests and evidence.",
-      timestamp: 'Ready',
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessageItem[]>(() => {
+    if (initialMessages && initialMessages.length > 0) {
+      return initialMessages;
+    }
+    return [
+      {
+        id: 'init-dog',
+        sender: 'dog',
+        text: "Woof! I'm Barkley! Ask me anything about this repository's architecture, dependencies, or the rooms in the house!",
+        timestamp: 'Ready',
+      },
+      {
+        id: 'init-cat',
+        sender: 'cat',
+        text: "And I'm Cleo. I keep Barkley honest. I only accept real verified tests and evidence.",
+        timestamp: 'Ready',
+      },
+    ];
+  });
 
   const currentProjectKey = isSampleActive
     ? 'sample:booknook-demo'
@@ -48,28 +57,39 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   useEffect(() => {
     if (prevProjectKeyRef.current !== currentProjectKey) {
       prevProjectKeyRef.current = currentProjectKey;
-      setMessages([
-        {
-          id: `reset-dog-${Date.now()}`,
-          sender: 'dog',
-          text: isSampleActive
-            ? "Woof! Switched to sample BookNook repository. Previous conversation cleared."
-            : `Woof! Switched project to ${currentProjectKey}. Previous conversation cleared. Ask me anything about this repository's architecture!`,
-          timestamp: 'Reset',
-        },
-        {
-          id: `reset-cat-${Date.now()}`,
-          sender: 'cat',
-          text: isSampleActive
-            ? "Showing sample architecture. All claims will be matched against sample data."
-            : `Project ${currentProjectKey} loaded. I will only accept real files and verified evidence from this scan.`,
-          timestamp: 'Reset',
-        },
-      ]);
+      if (initialMessages && initialMessages.length > 0) {
+        setMessages(initialMessages);
+      } else {
+        const resetMessages: ChatMessageItem[] = [
+          {
+            id: `reset-dog-${Date.now()}`,
+            sender: 'dog',
+            text: isSampleActive
+              ? "Woof! Switched to sample BookNook repository. Previous conversation cleared."
+              : `Woof! Switched project to ${currentProjectKey}. Previous conversation cleared. Ask me anything about this repository's architecture!`,
+            timestamp: 'Reset',
+          },
+          {
+            id: `reset-cat-${Date.now()}`,
+            sender: 'cat',
+            text: isSampleActive
+              ? "Showing sample architecture. All claims will be matched against sample data."
+              : `Project ${currentProjectKey} loaded. I will only accept real files and verified evidence from this scan.`,
+            timestamp: 'Reset',
+          },
+        ];
+        setMessages(resetMessages);
+        onMessagesChange?.(resetMessages);
+      }
       setErrorMessage(null);
       setSetupRequired(false);
     }
-  }, [currentProjectKey, isSampleActive]);
+  }, [currentProjectKey, isSampleActive, initialMessages, onMessagesChange]);
+
+  const updateAndNotifyMessages = (newMsgs: ChatMessageItem[]) => {
+    setMessages(newMsgs);
+    onMessagesChange?.(newMsgs);
+  };
 
   const [inputVal, setInputVal] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -96,7 +116,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     };
 
     const newMessages = [...messages, userMessageItem];
-    setMessages(newMessages);
+    updateAndNotifyMessages(newMessages);
     setInputVal('');
     setIsLoading(true);
     setErrorMessage(null);
@@ -225,7 +245,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }));
 
-      setMessages((prev) => [...prev, ...replyItems]);
+      const updatedMessages = [...messages, ...replyItems];
+      updateAndNotifyMessages(updatedMessages);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network failure';
       setErrorMessage(`Request failed: ${msg}`);

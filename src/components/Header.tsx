@@ -7,6 +7,9 @@ interface HeaderProps {
   isRealRepo?: boolean;
   branchName?: string;
   scanStatus?: 'completed' | 'partial' | 'failed';
+  isSavedData?: boolean;
+  commitSha?: string;
+  scannedAt?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,13 +18,26 @@ export const Header: React.FC<HeaderProps> = ({
   isRealRepo = false,
   branchName,
   scanStatus,
+  isSavedData = false,
+  commitSha,
+  scannedAt,
 }) => {
+  const formatTime = (iso?: string) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
   return (
     <header className="app-header">
       <div className="header-brand">
         <div className="brand-title-row">
           <span className="brand-name">The Living Blueprint</span>
-          <span className="version-pill">v0.12.1 · Milestone T12.1</span>
+          <span className="version-pill">v0.13.0 · Milestone T13</span>
         </div>
         <p className="brand-purpose">
           Evidence-backed architecture verification for AI coding agent projects
@@ -30,14 +46,25 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="header-status">
         <div
-          className={`status-badge ${isRealRepo ? 'real-repo' : 'sample-data'}`}
-          title={isRealRepo ? 'Real repository scanned from GitHub REST API' : 'Fallback demonstration dataset'}
+          className={`status-badge ${isRealRepo ? (isSavedData ? 'saved-repo' : 'real-repo') : 'sample-data'}`}
+          title={
+            isRealRepo
+              ? isSavedData
+                ? `Restored from saved scan at ${scannedAt || 'earlier session'}. Not yet refreshed against GitHub.`
+                : 'Live repository scan from GitHub REST API'
+              : 'Fallback demonstration dataset'
+          }
         >
-          <span className={`status-indicator-dot ${isRealRepo ? 'real' : 'sample'}`} />
+          <span className={`status-indicator-dot ${isRealRepo ? (isSavedData ? 'saved' : 'real') : 'sample'}`} />
           <span>
             Source: <strong>{sourceName}</strong>{' '}
             {branchName && <span className="branch-label">[{branchName}]</span>}{' '}
-            ({isRealRepo ? `Real Scan · ${scanStatus?.toUpperCase() ?? 'COMPLETED'}` : sourceStatusLabel})
+            {commitSha && <span className="commit-tag">@{commitSha.slice(0, 7)}</span>}{' '}
+            ({isRealRepo
+              ? isSavedData
+                ? `Saved Scan (${formatTime(scannedAt) || 'local'} · Not refreshed)`
+                : `Live Scan · ${scanStatus?.toUpperCase() ?? 'COMPLETED'}`
+              : sourceStatusLabel})
           </span>
         </div>
       </div>

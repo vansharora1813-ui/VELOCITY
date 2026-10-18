@@ -85,6 +85,7 @@ export interface GitHubScanResult {
   repo: string;
   metadata?: GitHubRepoMetadata;
   commitSha?: string;
+  scannedAt?: string;
   treeTruncated: boolean;
   totalFilesDiscovered: number;
   discoveredFilePaths?: string[];
