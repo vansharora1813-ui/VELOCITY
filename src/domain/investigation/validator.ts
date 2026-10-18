@@ -82,6 +82,7 @@ export function validateInvestigationFinding(
   );
 
   const validatedRefs: ValidatedEvidenceRef[] = [];
+  const rejectedPaths: string[] = [];
   const rawPaths = Array.isArray(raw.evidencePaths) ? raw.evidencePaths : [];
 
   for (const item of rawPaths) {
@@ -107,18 +108,26 @@ export function validateInvestigationFinding(
         note: 'Discovered in git tree, but content not inspected in 12-file sample',
       });
     } else {
-      // Fabricated / ungrounded path: intentionally excluded from validated references
+      // Fabricated / ungrounded path: rejected and explicitly tracked
+      rejectedPaths.push(cleanPath);
     }
   }
 
+  // Append explicit rejection notice to uncertainties if any paths were rejected
+  let finalUncertainties = rawUncertainties;
+  if (rejectedPaths.length > 0) {
+    const rejectionNotice = `[REJECTED UNGROUNDED EVIDENCE: Excluded ${rejectedPaths.length} path(s) not found in scanned git tree: ${rejectedPaths.join(', ')}]`;
+    finalUncertainties = finalUncertainties ? `${finalUncertainties} ${rejectionNotice}` : rejectionNotice;
+  }
+
   // Check: if classification is 'observed', but no inspected files exist among validated refs,
-  // demote to 'inferred' or 'unverified'
+  // or if fabricated references were submitted, demote to 'inferred' or 'unverified'
   const hasInspectedRef = validatedRefs.some((r) => r.isInspected);
-  if (classification === 'observed' && !hasInspectedRef) {
+  if (classification === 'observed' && (!hasInspectedRef || rejectedPaths.length > 0)) {
     classification = validatedRefs.length > 0 ? 'inferred' : 'unverified';
   }
 
-  // If there are zero valid references, classify as unverified
+  // If there are zero valid references and classification is 'observed', classify as unverified
   if (validatedRefs.length === 0 && classification === 'observed') {
     classification = 'unverified';
   }
@@ -165,8 +174,9 @@ export function validateInvestigationFinding(
     severity,
     evidenceClassification: classification,
     evidenceReferences: validatedRefs,
+    rejectedReferences: rejectedPaths.length > 0 ? rejectedPaths : undefined,
     recommendedNextStep: rawNextStep.slice(0, 300),
-    uncertainties: rawUncertainties.slice(0, 300),
+    uncertainties: finalUncertainties.slice(0, 500),
     companionMessages,
   };
 }

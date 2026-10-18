@@ -29,6 +29,7 @@ export interface RoomInvestigationFinding {
   severity: IssueSeverity;
   evidenceClassification: EvidenceClassification;
   evidenceReferences: ValidatedEvidenceRef[];
+  rejectedReferences?: string[];
   recommendedNextStep: string;
   uncertainties: string;
   companionMessages: CompanionReplyMessage[];

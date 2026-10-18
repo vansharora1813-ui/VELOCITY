@@ -71,7 +71,7 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
             category: f.category,
             contentExcerpt: f.contentExcerpt,
           })),
-          discoveredFilePaths: scanResult.inspectedFiles.map((f) => f.path),
+          discoveredFilePaths: scanResult.discoveredFilePaths || scanResult.inspectedFiles.map((f) => f.path),
           detectedTechnologies: scanResult.detectedTechnologies,
         }
       : {

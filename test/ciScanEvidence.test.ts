@@ -41,8 +41,9 @@ describe('Real CI Evidence During Repository Scanning (T10)', () => {
             sha: 'tree-sha-root',
             tree: [
               { path: 'package.json', mode: '100644', type: 'blob', sha: 'blob1', size: 200, url: '' },
-              { path: 'src/index.js', mode: '100644', type: 'blob', sha: 'blob2', size: 800, url: '' },
-              { path: 'tests/tasks.test.js', mode: '100644', type: 'blob', sha: 'blob3', size: 1200, url: '' },
+              { path: 'src/server.js', mode: '100644', type: 'blob', sha: 'blob2', size: 800, url: '' },
+              { path: 'test/createTask.test.js', mode: '100644', type: 'blob', sha: 'blob3', size: 1200, url: '' },
+              { path: 'test/server.test.js', mode: '100644', type: 'blob', sha: 'blob4', size: 1400, url: '' },
             ],
             truncated: false,
           }),
@@ -278,8 +279,8 @@ describe('Real CI Evidence During Repository Scanning (T10)', () => {
     const gatewayRoom = house.rooms.find((r) => r.id === 'room-tests' || r.layer === 'gateway');
     assert.ok(gatewayRoom);
 
-    // Number of test files detected is 1
-    assert.strictEqual(gatewayRoom.metrics.testFilesCount, 1);
+    // Number of test files detected is 2 (test/createTask.test.js and test/server.test.js)
+    assert.strictEqual(gatewayRoom.metrics.testFilesCount, 2);
     // Must NOT invent test case pass/fail counts
     assert.strictEqual(gatewayRoom.metrics.testsPassed, undefined);
     assert.strictEqual(gatewayRoom.metrics.totalTests, undefined);
