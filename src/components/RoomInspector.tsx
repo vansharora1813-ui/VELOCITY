@@ -13,12 +13,15 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({ room, onClose }) =
     switch (status) {
       case 'verified':
         return <span style={{ color: 'var(--status-verified)' }}>✓ Verified by Evidence</span>;
+      case 'implemented':
       case 'in_progress':
-        return <span style={{ color: 'var(--status-progress)' }}>⚡ Under Construction (WIP)</span>;
+        return <span style={{ color: 'var(--status-progress)' }}>⚡ Implemented (Verification Pending)</span>;
       case 'planned':
         return <span style={{ color: 'var(--status-planned)' }}>○ Planned (Wireframe Spec)</span>;
       case 'blocked':
         return <span style={{ color: 'var(--status-blocked)' }}>✕ Failing / Blocked</span>;
+      case 'unknown':
+        return <span style={{ color: '#B6A6C5' }}>? Unknown / Insufficient Evidence</span>;
     }
   };
 

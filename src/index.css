@@ -189,6 +189,7 @@ html, body, #root {
 .legend-swatch.progress { background: var(--status-progress); }
 .legend-swatch.planned { background: transparent; border: 1px dashed var(--status-planned); }
 .legend-swatch.blocked { background: var(--status-blocked); }
+.legend-swatch.unknown { background: #4F4756; border: 1px dashed #9A8AA8; }
 
 /* SVG Canvas Viewport */
 .svg-canvas-wrapper {

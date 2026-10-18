@@ -1,4 +1,11 @@
-export type RoomStatus = 'verified' | 'in_progress' | 'planned' | 'blocked';
+export type RoomStatus =
+  | 'planned'
+  | 'implemented'
+  | 'verified'
+  | 'blocked'
+  | 'unknown'
+  | 'in_progress';
+
 
 export interface ArchitecturalRoom {
   id: string;

@@ -41,7 +41,7 @@ export const App: React.FC = () => {
               </div>
               <div className="legend-item">
                 <span className="legend-swatch progress" />
-                <span>In Progress</span>
+                <span>Implemented</span>
               </div>
               <div className="legend-item">
                 <span className="legend-swatch planned" />
@@ -50,6 +50,10 @@ export const App: React.FC = () => {
               <div className="legend-item">
                 <span className="legend-swatch blocked" />
                 <span>Blocked</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-swatch unknown" />
+                <span>Unknown</span>
               </div>
             </div>
           </div>

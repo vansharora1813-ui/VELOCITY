@@ -119,6 +119,7 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
           badgeBg: '#2C392C',
           badgeColor: '#A8D4A5',
         };
+      case 'implemented':
       case 'in_progress':
         return {
           topFill: isSelected ? '#635133' : '#52432A',
@@ -126,7 +127,7 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
           rightFill: isSelected ? '#57462C' : '#473A25',
           stroke: isSelected ? '#C49B52' : '#9E7A3E',
           dash: 'none',
-          badgeText: '⚡ In Progress',
+          badgeText: '⚡ Implemented',
           badgeBg: '#3D311F',
           badgeColor: '#E0B565',
         };
@@ -151,6 +152,17 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
           badgeText: '✕ Blocked',
           badgeBg: '#3C2020',
           badgeColor: '#E28383',
+        };
+      case 'unknown':
+        return {
+          topFill: isSelected ? '#4F4756' : '#3E3744',
+          leftFill: isSelected ? '#3E3745' : '#2F2B36',
+          rightFill: isSelected ? '#463E4D' : '#36313C',
+          stroke: isSelected ? '#9A8AA8' : '#766782',
+          dash: '3,3',
+          badgeText: '? Unknown',
+          badgeBg: '#2E2835',
+          badgeColor: '#B6A6C5',
         };
     }
   };
