@@ -41,11 +41,15 @@ All API keys and LLM requests remain strictly server-side and are never exposed 
 - **Environment Variables**:
   - `GEMINI_API_KEY`: Secret API key obtained from Google AI Studio. Set in Vercel Project Settings > Environment Variables.
   - `AI_MODEL`: Optional model name (default: `gemini-3.8-flash`).
+- **Function Timeouts & Alignment (`maxDuration: 30`)**:
+  - Configured explicitly in both `vercel.json` (`functions: { "api/*.ts": { "maxDuration": 30 } }`) and function exports (`export const maxDuration = 30;`).
+  - Upstream provider timeouts are bounded to 12s (chat) and 14s (investigation), leaving a 16–18s margin for TLS negotiation, JSON schema formatting, and validation without hitting the serverless ceiling.
+  - Vercel Plan Limits: Hobby accounts support function durations up to 60s (default 10s without explicit config); Pro accounts support up to 300s. The 30s duration is supported on both tiers.
 - **Deployment Configuration (`vercel.json`)**:
   - Build Command: `npm run build` (`tsc && vite build`)
   - Output Directory: `dist`
   - Clean URLs: `true`
-  - SPA Rewrites: Routes `/api/*` to serverless endpoints and all other routes to `/index.html`.
+  - SPA Rewrites: Strict negative lookahead `/((?!api/).*)` routes non-API URLs to `/index.html`, ensuring API routes never accidentally redirect to the SPA shell.
 - **Post-Deploy Smoke Testing**:
   - Test health: `curl -s https://<project>.vercel.app/api/health`
   - Verify same-origin chat & investigation directly from deployed website interface.
@@ -58,4 +62,5 @@ All API keys and LLM requests remain strictly server-side and are never exposed 
 - **Milestone T04 (Complete)**: AI Group Chat + Dog & Cat Companions. Shared model call with multi-persona JSON replies, grounded repo context, secure server-side integration (`/api/chat`), pixel pet avatars, typing indicator, and untrusted repo data defense.
 - **Milestone T05 (Complete)**: Evidence-Backed Investigation & Repair Prompt Generation. Room-level investigation workflow (`POST /api/investigate`), structured finding schema (`IssueCategory`, `IssueSeverity`, `EvidenceClassification`), strict evidence validation against scanned files (fabricated path filtering, uninspected file marking, severity capping), copy-ready self-contained coding agent repair prompts (with acceptance criteria and investigation-first mode for weak evidence), and visual copy confirmation, maintaining the deterministic status engine boundary.
 - **Milestone T06 (Complete)**: Fix Reporting, Repository Re-Inspection and Evidence-Based Verification. Read-only lifecycle completing repair workflow (`UserFixReport`, `reinspectForFix`), commit SHA/PR reference validation against active repository identity, commit change inspection and diff budget tracking, automated GitHub CI check run classification and functional test relevance evaluation, strict evidence provenance (`source_code` for inspected changes, `test_result` for real CI outcomes, `user_confirmation` for pasted text claims), deterministic status updates and failure supersession, and UI lifecycle card with companion dialogue and refresh actions.
-- **Milestone T07 (Current - Complete)**: Production API Deployment and End-to-End Readiness. Vercel-compatible root `api/` serverless functions (`api/chat.ts`, `api/investigate.ts`, `api/health.ts`), unified request parsing for both stream and pre-parsed bodies, payload size and Content-Type validation, zero-leak credential protection, Vercel SPA deployment configuration (`vercel.json`), and comprehensive route tests.
+- **Milestone T07 (Complete)**: Production API Deployment and End-to-End Readiness. Vercel-compatible root `api/` serverless functions (`api/chat.ts`, `api/investigate.ts`, `api/health.ts`), unified request parsing for both stream and pre-parsed bodies, payload size and Content-Type validation, zero-leak credential protection, Vercel SPA deployment configuration (`vercel.json`), and comprehensive route tests.
+- **Milestone T08 (Current - Complete)**: Production Route and Function Timeout Validation. Explicit function `maxDuration: 30` alignment across code and `vercel.json` with 16–18s upstream buffer, strict negative-lookahead SPA rewrites, local route validation against live HTTP requests, and browser bundle secret-leak auditing.

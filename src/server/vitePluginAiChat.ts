@@ -5,40 +5,28 @@ import { handleHealthApiRequest } from './healthHandler.ts';
 
 export function vitePluginAiChat(): Plugin {
   const attachMiddleware = (server: ViteDevServer | PreviewServer) => {
-    server.middlewares.use('/api/health', (req, res, next) => {
-      if (req.method === 'GET') {
-        handleHealthApiRequest(req, res).catch((err) => {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ success: false, error: (err as Error).message }));
-        });
-      } else {
-        next();
-      }
+    server.middlewares.use('/api/health', (req, res) => {
+      handleHealthApiRequest(req, res).catch((err) => {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+      });
     });
 
-    server.middlewares.use('/api/chat', (req, res, next) => {
-      if (req.method === 'POST') {
-        handleChatApiRequest(req, res).catch((err) => {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ success: false, error: (err as Error).message }));
-        });
-      } else {
-        next();
-      }
+    server.middlewares.use('/api/chat', (req, res) => {
+      handleChatApiRequest(req, res).catch((err) => {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+      });
     });
 
-    server.middlewares.use('/api/investigate', (req, res, next) => {
-      if (req.method === 'POST') {
-        handleInvestigateApiRequest(req, res).catch((err) => {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ success: false, error: (err as Error).message }));
-        });
-      } else {
-        next();
-      }
+    server.middlewares.use('/api/investigate', (req, res) => {
+      handleInvestigateApiRequest(req, res).catch((err) => {
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+      });
     });
   };
 

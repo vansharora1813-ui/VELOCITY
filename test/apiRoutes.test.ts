@@ -257,8 +257,8 @@ describe('Production API Routes & Serverless Adapters', () => {
     });
   });
 
-  describe('Serverless Function Entrypoints Parity', () => {
-    it('confirms api/chat.ts serverless function delegates to handleChatApiRequest', async () => {
+  describe('Serverless Function Entrypoints Parity & Configuration', () => {
+    it('confirms api/chat.ts serverless function delegates to handleChatApiRequest and configures maxDuration', async () => {
       const req = createMockRequest({ method: 'GET' });
       const res = createMockResponse();
 
@@ -266,9 +266,12 @@ describe('Production API Routes & Serverless Adapters', () => {
       assert.strictEqual(res.statusCode, 405);
       const data = JSON.parse(res.body);
       assert.strictEqual(data.success, false);
+
+      const chatModule = await import('../api/chat.ts');
+      assert.strictEqual(chatModule.maxDuration, 30);
     });
 
-    it('confirms api/investigate.ts serverless function delegates to handleInvestigateApiRequest', async () => {
+    it('confirms api/investigate.ts serverless function delegates to handleInvestigateApiRequest and configures maxDuration', async () => {
       const req = createMockRequest({ method: 'GET' });
       const res = createMockResponse();
 
@@ -276,9 +279,12 @@ describe('Production API Routes & Serverless Adapters', () => {
       assert.strictEqual(res.statusCode, 405);
       const data = JSON.parse(res.body);
       assert.strictEqual(data.success, false);
+
+      const investigateModule = await import('../api/investigate.ts');
+      assert.strictEqual(investigateModule.maxDuration, 30);
     });
 
-    it('confirms api/health.ts serverless function delegates to handleHealthApiRequest', async () => {
+    it('confirms api/health.ts serverless function delegates to handleHealthApiRequest and configures maxDuration', async () => {
       const req = createMockRequest({ method: 'GET' });
       const res = createMockResponse();
 
@@ -286,6 +292,27 @@ describe('Production API Routes & Serverless Adapters', () => {
       assert.strictEqual(res.statusCode, 200);
       const data = JSON.parse(res.body);
       assert.strictEqual(data.status, 'ok');
+
+      const healthModule = await import('../api/health.ts');
+      assert.strictEqual(healthModule.maxDuration, 10);
+    });
+
+    it('validates vercel.json rewrite regex prevents API routes from redirecting to index.html', async () => {
+      const { readFileSync } = await import('node:fs');
+      const vercelConfig = JSON.parse(readFileSync('vercel.json', 'utf8'));
+
+      assert.strictEqual(vercelConfig.functions['api/*.ts'].maxDuration, 30);
+
+      const spaRewrite = vercelConfig.rewrites.find((r: any) => r.destination === '/index.html');
+      assert.ok(spaRewrite, 'Must have SPA rewrite to /index.html');
+
+      // Test negative lookahead regex
+      const regex = new RegExp(`^${spaRewrite.source.replace('(.*)', '.*')}$`);
+      assert.strictEqual(regex.test('/api/chat'), false, '/api/chat must NOT rewrite to index.html');
+      assert.strictEqual(regex.test('/api/investigate'), false, '/api/investigate must NOT rewrite to index.html');
+      assert.strictEqual(regex.test('/api/health'), false, '/api/health must NOT rewrite to index.html');
+      assert.strictEqual(regex.test('/overview'), true, '/overview must rewrite to index.html');
+      assert.strictEqual(regex.test('/room/1'), true, '/room/1 must rewrite to index.html');
     });
   });
 });
