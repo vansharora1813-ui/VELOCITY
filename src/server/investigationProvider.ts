@@ -238,7 +238,11 @@ export async function executeRoomInvestigation(
         error: 'Investigation request timed out (14s limit). Please try again.',
       };
     }
-    const msg = err instanceof Error ? err.message : 'Network failure';
+    let msg = err instanceof Error ? err.message : 'Network failure';
+    if (apiKey) {
+      msg = msg.split(apiKey).join('[REDACTED]');
+    }
+    msg = msg.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
     return {
       success: false,
       code: 'PROVIDER_ERROR',

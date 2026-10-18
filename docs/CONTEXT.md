@@ -30,14 +30,26 @@ There is a strict architectural firewall between deterministic evidence and AI d
 2. **AI Companion Interpretation**: The AI companions can explain, critique, and guide the user through the codebase, but the AI model **cannot mutate or set room status directly**. Even if an AI asserts a feature is verified, the engine ignores AI claims for verified status without passing test evidence.
 3. **Security Boundary**: Scanned repository files and READMEs are treated as untrusted data. The model is explicitly instructed to disregard prompt injections or instructions embedded in scanned code.
 
-## 4. AI Provider Configuration
-All API keys remain server-side and are never exposed to Vite or client bundles.
+## 4. Production & Server Architecture (Vercel Serverless + Vite)
+All API keys and LLM requests remain strictly server-side and are never exposed to Vite or client bundles.
 - **Provider**: Google Gemini REST API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`).
+- **Unified Handlers**: Business logic and security boundaries are implemented once in `src/server/` (`chatHandler.ts`, `investigateHandler.ts`, `healthHandler.ts`) and shared between local Vite middleware (`vitePluginAiChat.ts`) and Vercel serverless functions (`api/chat.ts`, `api/investigate.ts`, `api/health.ts`).
+- **Production Serverless Routes (`api/`)**:
+  - `POST /api/chat`: AI companion group chat with Barkley & Cleo.
+  - `POST /api/investigate`: Evidence-backed room investigation & prompt generation.
+  - `GET /api/health`: Non-sensitive service status and config check (`aiConfigured: true/false`).
 - **Environment Variables**:
-  - `GEMINI_API_KEY`: API key obtained from Google AI Studio.
+  - `GEMINI_API_KEY`: Secret API key obtained from Google AI Studio. Set in Vercel Project Settings > Environment Variables.
   - `AI_MODEL`: Optional model name (default: `gemini-3.8-flash`).
-- **Local Dev & Preview**: Handled via Vite server middleware (`/api/chat`), with request size limits (100KB), timeouts (12s), and rate-limit handling.
-- **Missing Config Behavior**: If `GEMINI_API_KEY` is not present, the server returns `{ success: false, code: 'CONFIG_REQUIRED' }` and the chat panel displays an informative configuration notice. Hardcoded mock responses are never silently fabricated.
+- **Deployment Configuration (`vercel.json`)**:
+  - Build Command: `npm run build` (`tsc && vite build`)
+  - Output Directory: `dist`
+  - Clean URLs: `true`
+  - SPA Rewrites: Routes `/api/*` to serverless endpoints and all other routes to `/index.html`.
+- **Post-Deploy Smoke Testing**:
+  - Test health: `curl -s https://<project>.vercel.app/api/health`
+  - Verify same-origin chat & investigation directly from deployed website interface.
+  - If `GEMINI_API_KEY` is omitted, endpoints respond cleanly with `CONFIG_REQUIRED` without fabricating responses.
 
 ## 5. Phased Roadmap
 - **Milestone T01 (Complete)**: Running Foundation + Visible House Shell. Minimum scaffold, isometric SVG house with foundation, pillars, rooms, roof, restrained dark coffee theme, preview chat panel with companion identities, and sample data status labeling.
@@ -45,5 +57,5 @@ All API keys remain server-side and are never exposed to Vite or client bundles.
 - **Milestone T03 (Complete)**: Real GitHub Repository Ingestion. Public repo URL validation, bounded Git tree scanning (up to 12 files), file filtering/prioritization, rate-limit parsing, telemetry drawer, and dynamic house mapping.
 - **Milestone T04 (Complete)**: AI Group Chat + Dog & Cat Companions. Shared model call with multi-persona JSON replies, grounded repo context, secure server-side integration (`/api/chat`), pixel pet avatars, typing indicator, and untrusted repo data defense.
 - **Milestone T05 (Complete)**: Evidence-Backed Investigation & Repair Prompt Generation. Room-level investigation workflow (`POST /api/investigate`), structured finding schema (`IssueCategory`, `IssueSeverity`, `EvidenceClassification`), strict evidence validation against scanned files (fabricated path filtering, uninspected file marking, severity capping), copy-ready self-contained coding agent repair prompts (with acceptance criteria and investigation-first mode for weak evidence), and visual copy confirmation, maintaining the deterministic status engine boundary.
-- **Milestone T06 (Current - Complete)**: Fix Reporting, Repository Re-Inspection and Evidence-Based Verification. Read-only lifecycle completing repair workflow (`UserFixReport`, `reinspectForFix`), commit SHA/PR reference validation against active repository identity, commit change inspection and diff budget tracking, automated GitHub CI check run classification and functional test relevance evaluation, strict evidence provenance (`source_code` for inspected changes, `test_result` for real CI outcomes, `user_confirmation` for pasted text claims), deterministic status updates and failure supersession, and UI lifecycle card with companion dialogue and refresh actions.
-- **Milestone T07**: Continuous Agent Sync & Export. Real-time updates as external coding agents commit changes, plus summary export.
+- **Milestone T06 (Complete)**: Fix Reporting, Repository Re-Inspection and Evidence-Based Verification. Read-only lifecycle completing repair workflow (`UserFixReport`, `reinspectForFix`), commit SHA/PR reference validation against active repository identity, commit change inspection and diff budget tracking, automated GitHub CI check run classification and functional test relevance evaluation, strict evidence provenance (`source_code` for inspected changes, `test_result` for real CI outcomes, `user_confirmation` for pasted text claims), deterministic status updates and failure supersession, and UI lifecycle card with companion dialogue and refresh actions.
+- **Milestone T07 (Current - Complete)**: Production API Deployment and End-to-End Readiness. Vercel-compatible root `api/` serverless functions (`api/chat.ts`, `api/investigate.ts`, `api/health.ts`), unified request parsing for both stream and pre-parsed bodies, payload size and Content-Type validation, zero-leak credential protection, Vercel SPA deployment configuration (`vercel.json`), and comprehensive route tests.

@@ -240,7 +240,11 @@ export async function executeAiChat(
         error: 'AI provider request timed out (12s limit). Please try again.',
       };
     }
-    const msg = err instanceof Error ? err.message : 'Network error';
+    let msg = err instanceof Error ? err.message : 'Network error';
+    if (apiKey) {
+      msg = msg.split(apiKey).join('[REDACTED]');
+    }
+    msg = msg.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
     return {
       success: false,
       code: 'PROVIDER_ERROR',
