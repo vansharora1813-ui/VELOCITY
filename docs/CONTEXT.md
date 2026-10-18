@@ -7,26 +7,41 @@ Instead of parsing opaque chat histories or trusting unverified completion claim
 
 ## 2. Fixed Design & Product Decisions
 - **Main Visual Canvas**: An interactive, explorable isometric software-architecture house representing domains, layers, and status.
-- **Persistent Chat Panel**: Sits on the desktop right-hand side, with its title header centered at the top of that panel.
-- **AI Companions**:
-  - **Dog (Barkley)**: Friendly, energetic, helpful, focusing on forward momentum, scaffolding, and positive reinforcement.
-  - **Cat (Cleo)**: Sassy, observant, skeptical, demanding proof, checking test coverage, and flagging brittle assumptions.
-  - *Future implementation*: Both personas will be driven by a unified AI model guided by distinct persona rules, rather than static templates.
-  - *Rendering reference*: Architectural inspiration will adapt the rendering approach of [pixel-pet](https://github.com/blendi-remade/pixel-pet) following license inspection, without embedding extensions or blindly copying assets.
-- **Real Repository Scanning**: The production application ingests and scans real GitHub repositories. Pre-canned datasets (e.g. BookNook) exist strictly as fallback demonstrations and must be explicitly labeled as sample data.
+- **Persistent Chat Panel**: Sits on the desktop right-hand side, with its companion avatars and title header centered at the top.
+- **AI Companions (Barkley & Cleo)**:
+  - **Dog (Barkley)**: Friendly, energetic, helpful, focusing on forward momentum, scaffolding, and orientation. Speaks first in casual, conversational language.
+  - **Cat (Cleo)**: Sassy, observant, skeptical, demanding proof, checking test coverage, and flagging brittle assumptions. Joins selectively when there are real risks or gaps.
+  - *Unified AI Architecture*: One model call per turn produces structured JSON containing 1 or 2 messages (`speaker: 'dog' | 'cat'`). The model decides when the cat speaks.
+  - *Pixel Pet Rendering*: Compact vector pixel art adapted from procedural raster techniques inspired by [pixel-pet](https://github.com/blendi-remade/pixel-pet) (MIT License), rendered in the coffee/slate palette with subtle idle animations, without loading external browser extensions.
+- **Real Repository Scanning**: The production application ingests and scans real GitHub repositories using bounded REST API calls. Pre-canned datasets (e.g. BookNook) exist strictly as fallback demonstrations and are explicitly labeled as sample data.
 - **Truthful Status Policy**: Never claim a repository was scanned, a test passed, a build succeeded, or an AI responded unless it has actually occurred and produced verifiable output.
 
 ## 3. Core Evidence & Status Principle
 Code existing is not proof that a requirement works. The Living Blueprint categorizes rooms/subsystems into unambiguous, evidence-backed states:
 - **Verified**: Passing automated tests, verified builds, or validated runtime evidence.
-- **In Progress / Under Construction**: Actively being modified or implemented.
-- **Planned / Wireframe**: Defined in scope/architecture but missing implementation.
-- **Failing / Blocked**: Failing test suites, broken dependencies, or blocked prerequisites.
-- **Unknown**: Present in codebase but unverified or missing telemetry.
+- **Implemented**: Source code or configuration exists, but automated verification is missing or incomplete.
+- **Planned**: Defined in scope/architecture but missing implementation.
+- **Blocked**: Failing test suites, broken dependencies, or active blockers.
+- **Unknown**: Insufficient or contradictory evidence.
 
-## 4. Phased Roadmap
-- **Milestone T01 (Current)**: Running Foundation + Visible House Shell. Minimum scaffold, isometric SVG house with foundation, pillars, rooms, roof, restrained dark coffee theme, preview chat panel with companion identities, and sample data status labeling.
-- **Milestone T02**: GitHub Repository Ingestion & Evidence Scanner. Connecting real repo AST, git history, and test runner outputs to drive room status.
-- **Milestone T03**: Interactive Room Inspection & Deep Dive. Detailed drawer/modal viewing evidence files, commit history, and test logs per subsystem.
-- **Milestone T04**: AI Companions Live Integration. Unified model backend powering live multi-persona dialogue (Barkley & Cleo) responding to codebase status and evidence queries.
+### Observed Evidence vs. AI Companion Interpretation
+There is a strict architectural firewall between deterministic evidence and AI dialogue:
+1. **Observed Evidence (Ground Truth)**: Sourced from verified git trees, manifests, source code, and test runner outputs. Processed exclusively by the deterministic `statusEngine.ts`.
+2. **AI Companion Interpretation**: The AI companions can explain, critique, and guide the user through the codebase, but the AI model **cannot mutate or set room status directly**. Even if an AI asserts a feature is verified, the engine ignores AI claims for verified status without passing test evidence.
+3. **Security Boundary**: Scanned repository files and READMEs are treated as untrusted data. The model is explicitly instructed to disregard prompt injections or instructions embedded in scanned code.
+
+## 4. AI Provider Configuration
+All API keys remain server-side and are never exposed to Vite or client bundles.
+- **Provider**: Google Gemini REST API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`).
+- **Environment Variables**:
+  - `GEMINI_API_KEY`: API key obtained from Google AI Studio.
+  - `AI_MODEL`: Optional model name (default: `gemini-1.5-flash`).
+- **Local Dev & Preview**: Handled via Vite server middleware (`/api/chat`), with request size limits (100KB), timeouts (12s), and rate-limit handling.
+- **Missing Config Behavior**: If `GEMINI_API_KEY` is not present, the server returns `{ success: false, code: 'CONFIG_REQUIRED' }` and the chat panel displays an informative configuration notice. Hardcoded mock responses are never silently fabricated.
+
+## 5. Phased Roadmap
+- **Milestone T01 (Complete)**: Running Foundation + Visible House Shell. Minimum scaffold, isometric SVG house with foundation, pillars, rooms, roof, restrained dark coffee theme, preview chat panel with companion identities, and sample data status labeling.
+- **Milestone T02 (Complete)**: Evidence-Backed Project Status Engine. Typed domain models, deterministic 5-status derivation engine, requirement-level relevance, evidence history supersession, and 100% pure TypeScript unit tests.
+- **Milestone T03 (Complete)**: Real GitHub Repository Ingestion. Public repo URL validation, bounded Git tree scanning (up to 12 files), file filtering/prioritization, rate-limit parsing, telemetry drawer, and dynamic house mapping.
+- **Milestone T04 (Current - Complete)**: AI Group Chat + Dog & Cat Companions. Shared model call with multi-persona JSON replies, grounded repo context, secure server-side integration (`/api/chat`), pixel pet avatars, typing indicator, and untrusted repo data defense.
 - **Milestone T05**: Continuous Agent Sync & Export. Real-time updates as external coding agents commit changes, plus summary export.

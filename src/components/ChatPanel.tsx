@@ -1,71 +1,340 @@
-import React from 'react';
-import { ChatMessagePreview } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { PixelPetAvatar } from './PixelPetAvatar.tsx';
+import type { ArchitecturalRoom } from '../types.ts';
+import type { CompanionReplyMessage, CompanionSpeaker } from '../server/types.ts';
+import type { GitHubScanResult } from '../domain/github/types.ts';
 
-interface ChatPanelProps {
-  messages: ChatMessagePreview[];
+export interface ChatMessageItem {
+  id: string;
+  sender: 'user' | CompanionSpeaker;
+  text: string;
+  timestamp: string;
+  evidenceReference?: string;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages }) => {
+interface ChatPanelProps {
+  selectedRoom: ArchitecturalRoom | null;
+  scanResult: GitHubScanResult | null;
+  isSampleActive: boolean;
+  rooms: ArchitecturalRoom[];
+}
+
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  selectedRoom,
+  scanResult,
+  isSampleActive,
+  rooms,
+}) => {
+  const [messages, setMessages] = useState<ChatMessageItem[]>([
+    {
+      id: 'init-dog',
+      sender: 'dog',
+      text: "Woof! I'm Barkley! Ask me anything about this repository's architecture, dependencies, or the rooms in the house!",
+      timestamp: 'Ready',
+    },
+    {
+      id: 'init-cat',
+      sender: 'cat',
+      text: "And I'm Cleo. I keep Barkley honest. I only accept real verified tests and evidence.",
+      timestamp: 'Ready',
+    },
+  ]);
+
+  const [inputVal, setInputVal] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
+
+  const handleSendMessage = async (textToSend: string) => {
+    const trimmed = textToSend.trim();
+    if (!trimmed || isLoading) return;
+
+    const userMessageId = `user-${Date.now()}`;
+    const userMessageItem: ChatMessageItem = {
+      id: userMessageId,
+      sender: 'user',
+      text: trimmed,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const newMessages = [...messages, userMessageItem];
+    setMessages(newMessages);
+    setInputVal('');
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    // Build context payload from current scan / sample state
+    const repoContext = !isSampleActive && scanResult
+      ? {
+          owner: scanResult.owner,
+          repo: scanResult.repo,
+          branch: scanResult.metadata?.defaultBranch || 'main',
+          totalFiles: scanResult.totalFilesDiscovered,
+          inspectedFiles: scanResult.inspectedFiles.map((f) => ({
+            path: f.path,
+            category: f.category,
+          })),
+          detectedTechnologies: scanResult.detectedTechnologies,
+          roomSummaries: rooms.map((r) => ({
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            evidence: r.evidence,
+          })),
+        }
+      : {
+          owner: 'example',
+          repo: 'booknook-demo',
+          branch: 'main',
+          totalFiles: 42,
+          inspectedFiles: [
+            { path: 'src/auth/jwt.ts', category: 'source' },
+            { path: 'src/catalog/books.ts', category: 'source' },
+            { path: 'tests/auth.test.ts', category: 'test' },
+          ],
+          detectedTechnologies: ['TypeScript', 'React', 'PostgreSQL', 'Docker'],
+          roomSummaries: rooms.map((r) => ({
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            evidence: r.evidence,
+          })),
+        };
+
+    // Format bounded history
+    const historyPayload = newMessages
+      .slice(-6)
+      .filter((m) => m.id !== userMessageId)
+      .map((m) => ({
+        role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
+        text: m.text,
+        speaker: m.sender !== 'user' ? m.sender : undefined,
+      }));
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: trimmed,
+          history: historyPayload,
+          selectedRoomId: selectedRoom?.id,
+          repoContext,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        if (data.code === 'CONFIG_REQUIRED') {
+          setSetupRequired(true);
+        } else {
+          setErrorMessage(data.error || 'Failed to communicate with AI provider.');
+        }
+        return;
+      }
+
+      // Model returned valid replies (1 or 2 messages)
+      const companionReplies: CompanionReplyMessage[] = data.replies || [];
+      const replyItems: ChatMessageItem[] = companionReplies.map((r, idx) => ({
+        id: `reply-${Date.now()}-${idx}`,
+        sender: r.speaker,
+        text: r.text,
+        evidenceReference: r.evidenceReference,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }));
+
+      setMessages((prev) => [...prev, ...replyItems]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Network failure';
+      setErrorMessage(`Request failed: ${msg}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(inputVal);
+    }
+  };
+
+  const handleClearChat = () => {
+    setMessages([
+      {
+        id: 'reset-dog',
+        sender: 'dog',
+        text: "Clean slate! What part of the architecture should we inspect next?",
+        timestamp: 'Ready',
+      },
+    ]);
+    setErrorMessage(null);
+  };
+
   return (
-    <aside className="chat-panel-container" aria-label="AI Companions Chat Panel">
-      {/* Centred heading at the top of the panel */}
+    <aside className="chat-panel-container" aria-label="AI Companions Group Chat">
+      {/* Centred header at top of panel */}
       <div className="chat-panel-header">
-        <h2 className="chat-panel-heading">AI Companions</h2>
-        <div className="chat-panel-subheading">Barkley (Dog) & Cleo (Cat)</div>
+        <div className="chat-companion-avatars-row">
+          <div className="pet-header-avatar">
+            <PixelPetAvatar speaker="dog" size={24} />
+            <span className="pet-header-name">Barkley</span>
+          </div>
+          <span className="avatar-divider">&</span>
+          <div className="pet-header-avatar">
+            <PixelPetAvatar speaker="cat" size={24} />
+            <span className="pet-header-name">Cleo</span>
+          </div>
+        </div>
+        <div className="chat-panel-subheading">One model · Two distinct personalities</div>
       </div>
 
-      {/* Explicit UI Preview Notice */}
-      <div className="chat-banner-preview">
-        <strong>Preview Mode:</strong> Live AI is not connected yet. Real multi-persona dialogue powered by a unified LLM backend will be wired in future milestones.
-      </div>
+      {/* Setup notification if API key is not configured */}
+      {setupRequired && (
+        <div className="chat-setup-banner">
+          <strong>AI Provider Key Required</strong>
+          <p>
+            To activate live companion dialogue, add <code>GEMINI_API_KEY</code> to your{' '}
+            <code>.env</code> file on the server.
+          </p>
+        </div>
+      )}
 
-      {/* Conversation preview list */}
-      <div className="chat-messages-scroll" role="log" aria-live="polite">
-        {messages.map((msg) => (
-          <article
-            key={msg.id}
-            className={`companion-message ${msg.sender === 'dog' ? 'dog-style' : 'cat-style'}`}
-          >
-            <div className="message-meta">
-              <div className="companion-identity">
-                <div
-                  className="companion-avatar"
-                  aria-hidden="true"
-                  title={msg.sender === 'dog' ? 'Dog companion' : 'Cat companion'}
-                >
-                  {msg.sender === 'dog' ? '🐶' : '🐱'}
-                </div>
-                <div>
-                  <div className="companion-name">{msg.speakerName}</div>
-                  <div className="companion-tagline">{msg.tagline}</div>
-                </div>
-              </div>
-              <time className="message-timestamp">{msg.timestamp}</time>
-            </div>
-            <p className="message-body">{msg.content}</p>
-          </article>
-        ))}
-      </div>
-
-      {/* Chat Input Area (Explicitly disabled UI preview) */}
-      <div className="chat-input-area">
-        <textarea
-          className="chat-input-box"
-          disabled
-          aria-disabled="true"
-          placeholder="Companions are offline. Connect an AI provider in future milestones to chat..."
-          value=""
-          readOnly
-        />
-        <div className="chat-input-actions">
-          <span className="chat-input-hint">UI Preview Only · Input Disabled</span>
+      {/* Quick context chip for selected room */}
+      {selectedRoom && (
+        <div className="chat-selected-room-bar">
+          <span>Focusing on: <strong>{selectedRoom.name}</strong></span>
           <button
             type="button"
-            className="btn-send-disabled"
-            disabled
-            title="Chat disabled until AI provider is connected"
+            className="btn-ask-room"
+            onClick={() =>
+              handleSendMessage(
+                `Tell me about ${selectedRoom.name}: what evidence exists and what is missing?`
+              )
+            }
+            disabled={isLoading}
           >
-            Send
+            Ask about this room →
+          </button>
+        </div>
+      )}
+
+      {/* Group Chat Messages Scrollable Stream */}
+      <div className="chat-messages-scroll" role="log" aria-live="polite">
+        {messages.map((msg) => {
+          if (msg.sender === 'user') {
+            return (
+              <div key={msg.id} className="user-message-row">
+                <div className="user-bubble">
+                  <p className="message-body">{msg.text}</p>
+                  <span className="user-timestamp">{msg.timestamp}</span>
+                </div>
+              </div>
+            );
+          }
+
+          const isDog = msg.sender === 'dog';
+
+          return (
+            <div
+              key={msg.id}
+              className={`companion-group-row ${isDog ? 'companion-dog-row' : 'companion-cat-row'}`}
+            >
+              <div className="companion-avatar-col">
+                <PixelPetAvatar speaker={msg.sender} size={30} />
+              </div>
+              <div className="companion-bubble-col">
+                <div className="companion-bubble-header">
+                  <span className="companion-name-label">
+                    {isDog ? 'Barkley (Dog)' : 'Cleo (Cat)'}
+                  </span>
+                  <span className="companion-time-label">{msg.timestamp}</span>
+                </div>
+                <p className="message-body">{msg.text}</p>
+                {msg.evidenceReference && (
+                  <div className="evidence-ref-tag">
+                    Ref: <code>{msg.evidenceReference}</code>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Genuine Typing Indicator while waiting for model */}
+        {isLoading && (
+          <div className="typing-indicator-row">
+            <div className="typing-avatars">
+              <PixelPetAvatar speaker="dog" size={22} isTyping />
+              <PixelPetAvatar speaker="cat" size={22} isTyping />
+            </div>
+            <div className="typing-bubble">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Error Banner */}
+      {errorMessage && (
+        <div className="chat-error-toast" role="alert">
+          <span>⚠️ {errorMessage}</span>
+          <button
+            type="button"
+            className="error-dismiss-btn"
+            onClick={() => setErrorMessage(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Interactive Input Footer Area */}
+      <div className="chat-input-area">
+        <textarea
+          ref={textareaRef}
+          className="chat-input-box active-chat"
+          placeholder="Ask Barkley & Cleo about this codebase... (Enter to send, Shift+Enter for newline)"
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isLoading}
+          rows={2}
+          aria-label="Ask pet companions about repository architecture"
+        />
+
+        <div className="chat-input-actions">
+          <button
+            type="button"
+            className="btn-clear-chat"
+            onClick={handleClearChat}
+            disabled={isLoading || messages.length <= 1}
+            title="Clear conversation history"
+          >
+            Clear chat
+          </button>
+
+          <span className="chat-input-hint">Enter to send · Shift+Enter newline</span>
+
+          <button
+            type="button"
+            className="btn-send-active"
+            onClick={() => handleSendMessage(inputVal)}
+            disabled={isLoading || !inputVal.trim()}
+          >
+            {isLoading ? 'Thinking...' : 'Send'}
           </button>
         </div>
       </div>
