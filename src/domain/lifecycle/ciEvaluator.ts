@@ -57,6 +57,116 @@ export interface EvaluateCiOutcomeResult {
 }
 
 /**
+ * Fetches available public GitHub check runs for a commit, falling back to commit status API if needed.
+ */
+export async function fetchCommitCheckRuns(
+  owner: string,
+  repo: string,
+  commitSha: string,
+  fetchFn: typeof fetch = fetch
+): Promise<{ checks: GitHubCheckRun[]; warnings: string[] }> {
+  const checks: GitHubCheckRun[] = [];
+  const warnings: string[] = [];
+
+  try {
+    const checkRes = await fetchFn(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}/check-runs`,
+      { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'TheLivingBlueprint' } }
+    );
+
+    if (checkRes.ok) {
+      const checkData = await checkRes.json();
+      if (Array.isArray(checkData.check_runs)) {
+        for (const cr of checkData.check_runs) {
+          const relevance = classifyCheckRunRelevance(cr.name || '');
+          checks.push({
+            id: cr.id,
+            name: cr.name,
+            status: cr.status,
+            conclusion: cr.conclusion,
+            htmlUrl: cr.html_url || cr.details_url,
+            completedAt: cr.completed_at,
+            commitSha: cr.head_sha || commitSha,
+            isRelevantTestCheck: relevance.isRelevantTestCheck,
+            relevanceReason: relevance.relevanceReason,
+          });
+        }
+      }
+    } else if (checkRes.status === 403) {
+      warnings.push('GitHub API rate limit exceeded when fetching CI check runs.');
+    } else if (checkRes.status !== 404) {
+      warnings.push(`GitHub check-runs API returned HTTP ${checkRes.status}.`);
+    }
+  } catch {
+    warnings.push('Failed to query GitHub check-runs API; check results unavailable.');
+  }
+
+  // Fallback 1: GitHub Actions workflow runs for this exact commit
+  if (checks.length === 0) {
+    try {
+      const actionsRes = await fetchFn(
+        `https://api.github.com/repos/${owner}/${repo}/actions/runs?head_sha=${commitSha}&per_page=10`,
+        { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'TheLivingBlueprint' } }
+      );
+      if (actionsRes.ok) {
+        const actionsData = await actionsRes.json();
+        if (Array.isArray(actionsData.workflow_runs)) {
+          for (const wr of actionsData.workflow_runs) {
+            const relevance = classifyCheckRunRelevance(wr.name || '');
+            checks.push({
+              id: wr.id,
+              name: wr.name,
+              status: wr.status,
+              conclusion: wr.conclusion,
+              htmlUrl: wr.html_url,
+              completedAt: wr.updated_at,
+              commitSha: wr.head_sha || commitSha,
+              isRelevantTestCheck: relevance.isRelevantTestCheck,
+              relevanceReason: relevance.relevanceReason,
+            });
+          }
+        }
+      }
+    } catch {
+      // Fallback non-fatal
+    }
+  }
+
+  // Fallback 2: commit status API if no check runs found
+  if (checks.length === 0) {
+    try {
+      const statusRes = await fetchFn(
+        `https://api.github.com/repos/${owner}/${repo}/commits/${commitSha}/status`,
+        { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'TheLivingBlueprint' } }
+      );
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (Array.isArray(statusData.statuses)) {
+          for (const st of statusData.statuses) {
+            const relevance = classifyCheckRunRelevance(st.context || '');
+            checks.push({
+              id: st.id,
+              name: st.context,
+              status: st.state === 'pending' ? 'in_progress' : 'completed',
+              conclusion: st.state === 'success' ? 'success' : st.state === 'failure' ? 'failure' : null,
+              htmlUrl: st.target_url,
+              completedAt: st.updated_at,
+              commitSha,
+              isRelevantTestCheck: relevance.isRelevantTestCheck,
+              relevanceReason: relevance.relevanceReason,
+            });
+          }
+        }
+      }
+    } catch {
+      // Optional fallback suppressed
+    }
+  }
+
+  return { checks, warnings };
+}
+
+/**
  * Evaluates a list of GitHub check runs and returns the verification outcome and minted evidence records.
  */
 export function evaluateCheckRunsForVerification(
@@ -65,8 +175,24 @@ export function evaluateCheckRunsForVerification(
   targetCommitSha: string,
   timestamp: string
 ): EvaluateCiOutcomeResult {
-  const relevantTestChecks = checks.filter((c) => c.isRelevantTestCheck);
-  const unrelatedChecks = checks.filter((c) => !c.isRelevantTestCheck);
+  // Commit SHA mismatch check
+  const commitMatchingChecks = checks.filter(
+    (c) => !c.commitSha || !targetCommitSha || c.commitSha === targetCommitSha
+  );
+
+  if (checks.length > 0 && commitMatchingChecks.length === 0) {
+    return {
+      outcome: 'inconclusive',
+      outcomeReason: `Discovered CI checks belong to commit ${checks[0].commitSha?.slice(0, 7) || 'unknown'}, which does not match scanned revision ${targetCommitSha.slice(0, 7)}. Verification cannot be claimed.`,
+      relevantTestChecks: [],
+      unrelatedChecks: [],
+      verificationEvidenceRecords: [],
+    };
+  }
+
+  const effectiveChecks = commitMatchingChecks;
+  const relevantTestChecks = effectiveChecks.filter((c) => c.isRelevantTestCheck);
+  const unrelatedChecks = effectiveChecks.filter((c) => !c.isRelevantTestCheck);
 
   if (checks.length === 0) {
     return {

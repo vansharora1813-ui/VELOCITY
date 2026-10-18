@@ -21,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-brand">
         <div className="brand-title-row">
           <span className="brand-name">The Living Blueprint</span>
-          <span className="version-pill">v0.3.0 · Milestone T03</span>
+          <span className="version-pill">v0.10.2 · Milestone T10B</span>
         </div>
         <p className="brand-purpose">
           Evidence-backed architecture verification for AI coding agent projects

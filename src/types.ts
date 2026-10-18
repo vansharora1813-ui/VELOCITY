@@ -14,10 +14,16 @@ export interface ArchitecturalRoom {
   status: RoomStatus;
   description: string;
   evidence: string;
+  filePaths?: string[];
+  dependencies?: string[];
   metrics: {
     testsPassed?: number;
     totalTests?: number;
+    testFilesCount?: number;
     filesCount?: number;
+    ciStatus?: 'passing' | 'failing' | 'pending' | 'unavailable' | 'not_run';
+    ciCheckName?: string;
+    ciUrl?: string;
   };
   coords: {
     isoX: number;

@@ -9,6 +9,8 @@ import type {
   ScanStage,
 } from './types.ts';
 import { validateGitHubUrl } from './url.ts';
+import { fetchCommitCheckRuns, evaluateCheckRunsForVerification } from '../lifecycle/ciEvaluator.ts';
+import type { GitHubCheckRun } from '../lifecycle/types.ts';
 
 function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
   const limitHeader = headers.get('x-ratelimit-limit');
@@ -264,7 +266,65 @@ export async function scanGitHubRepository(
     };
   }
 
-  // 3. Filter and Prioritize Candidate Files (up to maxFiles)
+  // 3. Determine Scanned Commit SHA
+  let commitSha: string | undefined;
+  try {
+    const commitRes = await fetchFn(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${metadata.defaultBranch}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'TheLivingBlueprint-Scanner',
+        },
+      }
+    );
+    if (commitRes.ok) {
+      const commitData = await commitRes.json();
+      if (commitData && typeof commitData.sha === 'string') {
+        commitSha = commitData.sha;
+      }
+    }
+  } catch {
+    // Non-fatal if unmocked or network issue
+  }
+
+  if (!commitSha && treeEntries.length > 0) {
+    commitSha = treeEntries[0]?.sha;
+  }
+
+  // 4. Retrieve CI Check Runs for the Scanned Commit
+  const targetRef = commitSha || metadata.defaultBranch;
+  onProgress?.(
+    'fetching_checks',
+    `Querying GitHub CI check runs for commit ${targetRef.slice(0, 7)}...`
+  );
+
+  let checkRuns: GitHubCheckRun[] = [];
+  try {
+    const { checks: fetchedChecks, warnings: ciWarnings } = await fetchCommitCheckRuns(
+      owner,
+      repo,
+      targetRef,
+      fetchFn
+    );
+    warnings.push(...ciWarnings);
+    checkRuns = fetchedChecks;
+  } catch {
+    warnings.push('Verification evidence unavailable: failed to query GitHub check-runs API.');
+  }
+
+  if (!commitSha && checkRuns.length > 0 && checkRuns[0].commitSha) {
+    commitSha = checkRuns[0].commitSha;
+  }
+
+  const ciEvaluation = evaluateCheckRunsForVerification(
+    checkRuns,
+    'req-gw-ci',
+    commitSha || targetRef,
+    new Date().toISOString()
+  );
+
+  // 5. Filter and Prioritize Candidate Files (up to maxFiles)
   const { candidates, skipped } = prioritizeFilesForInspection(treeEntries, maxFiles);
 
   onProgress?.(
@@ -352,9 +412,12 @@ export async function scanGitHubRepository(
     owner,
     repo,
     metadata,
-    commitSha: treeEntries[0]?.sha,
+    commitSha,
+    checkRuns,
+    ciEvaluation,
     treeTruncated: isTruncated,
     totalFilesDiscovered: treeEntries.length,
+    discoveredFilePaths: treeEntries.map((e) => e.path),
     inspectedFiles,
     skippedFiles: skipped,
     detectedTechnologies: Array.from(detectedTechnologies).sort(),

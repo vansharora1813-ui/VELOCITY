@@ -29,7 +29,8 @@ export const ScanDetailsDrawer: React.FC<ScanDetailsDrawerProps> = ({
               Repository Scan Telemetry: {scanResult.owner}/{scanResult.repo}
             </h3>
             <div className="scan-drawer-subtitle">
-              Branch: <code>{scanResult.metadata?.defaultBranch || 'default'}</code> · Status:{' '}
+              Branch: <code>{scanResult.metadata?.defaultBranch || 'default'}</code> · Commit:{' '}
+              <code>{scanResult.commitSha ? scanResult.commitSha.slice(0, 7) : 'HEAD'}</code> · Status:{' '}
               <span className={`status-pill ${scanResult.status}`}>
                 {scanResult.status.toUpperCase()}
               </span>
@@ -95,6 +96,58 @@ export const ScanDetailsDrawer: React.FC<ScanDetailsDrawerProps> = ({
             </div>
           </div>
         )}
+
+        {/* GitHub CI & Check Runs */}
+        <div className="scan-ci-section" style={{ marginTop: 16 }}>
+          <div className="section-label">
+            GITHUB CI & AUTOMATED CHECK RUNS ({scanResult.checkRuns?.length ?? 0}):
+          </div>
+          {scanResult.checkRuns && scanResult.checkRuns.length > 0 ? (
+            <div className="lifecycle-checks-list" style={{ marginTop: 8 }}>
+              {scanResult.checkRuns.map((cr) => {
+                const concClass =
+                  cr.conclusion === 'success'
+                    ? 'conc-success'
+                    : cr.conclusion === 'failure' || cr.conclusion === 'timed_out'
+                    ? 'conc-failure'
+                    : 'conc-pending';
+                return (
+                  <div key={cr.id} className="lifecycle-check-item">
+                    <span className={`check-conclusion-tag ${concClass}`}>
+                      {cr.conclusion || cr.status}
+                    </span>
+                    <span className="check-name">{cr.name}</span>
+                    <span className="check-relevance">
+                      {cr.isRelevantTestCheck ? 'Automated test suite' : 'Non-functional task'}
+                    </span>
+                    {cr.completedAt && (
+                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                        {new Date(cr.completedAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                    {cr.htmlUrl && (
+                      <a
+                        href={cr.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="file-link"
+                        title="Open run on GitHub"
+                        style={{ marginLeft: 6 }}
+                      >
+                        ↗
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="empty-subtext" style={{ marginTop: 6 }}>
+              Verification evidence unavailable: No GitHub Actions or CI check runs retrieved for
+              scanned commit <code>{scanResult.commitSha ? scanResult.commitSha.slice(0, 7) : 'HEAD'}</code>.
+            </div>
+          )}
+        </div>
 
         {/* Inspected Files List */}
         <div className="scan-files-section">

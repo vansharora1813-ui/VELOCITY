@@ -7,10 +7,12 @@ import { addEvidenceRecord, deriveRoomStatus } from '../statusEngine.ts';
 import type { EvidenceRecord, RoomModule } from '../types.ts';
 import { categorizeFile } from '../github/fileFilter.ts';
 import type { InspectedFile } from '../github/types.ts';
-import { classifyCheckRunRelevance, evaluateCheckRunsForVerification } from './ciEvaluator.ts';
+import {
+  evaluateCheckRunsForVerification,
+  fetchCommitCheckRuns,
+} from './ciEvaluator.ts';
 import type {
   FixLifecycleState,
-  GitHubCheckRun,
   GitHubCommitInfo,
   ReinspectionOptions,
   UserFixReport,
@@ -179,66 +181,13 @@ export async function reinspectForFix(
   }
 
   // 5. Fetch CI Check Runs
-  const checks: GitHubCheckRun[] = [];
-  try {
-    const checkRes = await fetchFn(
-      `https://api.github.com/repos/${activeOwner}/${activeRepo}/commits/${commitInfo.sha}/check-runs`,
-      { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'TheLivingBlueprint' } }
-    );
-
-    if (checkRes.ok) {
-      const checkData = await checkRes.json();
-      if (Array.isArray(checkData.check_runs)) {
-        for (const cr of checkData.check_runs) {
-          const relevance = classifyCheckRunRelevance(cr.name || '');
-          checks.push({
-            id: cr.id,
-            name: cr.name,
-            status: cr.status,
-            conclusion: cr.conclusion,
-            htmlUrl: cr.html_url,
-            completedAt: cr.completed_at,
-            isRelevantTestCheck: relevance.isRelevantTestCheck,
-            relevanceReason: relevance.relevanceReason,
-          });
-        }
-      }
-    } else if (checkRes.status === 403) {
-      warnings.push('GitHub API rate limit exceeded when fetching CI check runs.');
-    }
-  } catch {
-    warnings.push('Failed to query GitHub check-runs API; check results unavailable.');
-  }
-
-  // If no check-runs found, also try commit status API
-  if (checks.length === 0) {
-    try {
-      const statusRes = await fetchFn(
-        `https://api.github.com/repos/${activeOwner}/${activeRepo}/commits/${commitInfo.sha}/status`,
-        { headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'TheLivingBlueprint' } }
-      );
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        if (Array.isArray(statusData.statuses)) {
-          for (const st of statusData.statuses) {
-            const relevance = classifyCheckRunRelevance(st.context || '');
-            checks.push({
-              id: st.id,
-              name: st.context,
-              status: st.state === 'pending' ? 'in_progress' : 'completed',
-              conclusion: st.state === 'success' ? 'success' : st.state === 'failure' ? 'failure' : null,
-              htmlUrl: st.target_url,
-              completedAt: st.updated_at,
-              isRelevantTestCheck: relevance.isRelevantTestCheck,
-              relevanceReason: relevance.relevanceReason,
-            });
-          }
-        }
-      }
-    } catch {
-      // optional fallback
-    }
-  }
+  const { checks, warnings: ciWarnings } = await fetchCommitCheckRuns(
+    activeOwner,
+    activeRepo,
+    commitInfo.sha,
+    fetchFn
+  );
+  warnings.push(...ciWarnings);
 
   // 6. Evaluate CI for Verification Evidence
   const targetRequirementId = room.requirements[0]?.id || `req-${room.id}`;

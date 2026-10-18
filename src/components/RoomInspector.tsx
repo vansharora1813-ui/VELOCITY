@@ -27,14 +27,14 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
   const [showPrompt, setShowPrompt] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Clear investigation state when switching rooms
+  // Clear investigation and prompt state when switching rooms, repository, or scanned commit
   useEffect(() => {
     setFinding(null);
     setErrorMessage(null);
     setSetupRequired(false);
     setShowPrompt(false);
     setCopySuccess(false);
-  }, [room?.id]);
+  }, [room?.id, scanResult?.owner, scanResult?.repo, scanResult?.commitSha, isSampleActive]);
 
   if (!room) return null;
 
@@ -187,13 +187,102 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
 
       <div className="room-detail-metrics">
         <span>Files: {room.metrics.filesCount ?? 0}</span>
-        <span>
-          Tests:{' '}
-          {room.metrics.testsPassed !== undefined
-            ? `${room.metrics.testsPassed}/${room.metrics.totalTests} passing`
-            : 'N/A'}
-        </span>
+        {room.metrics.testFilesCount !== undefined ? (
+          <span>Test files detected: {room.metrics.testFilesCount}</span>
+        ) : null}
+        {room.metrics.testsPassed !== undefined && room.metrics.totalTests !== undefined ? (
+          <span>
+            Tests executed: {room.metrics.testsPassed}/{room.metrics.totalTests} passing
+          </span>
+        ) : room.metrics.testFilesCount !== undefined ? (
+          <span>
+            Execution: {room.metrics.ciStatus === 'failing' ? 'Failing in CI' : room.metrics.ciStatus === 'passing' ? 'Passing in CI' : room.metrics.ciStatus === 'pending' ? 'In progress in CI' : 'not verified'}
+          </span>
+        ) : null}
+        {room.metrics.ciStatus && (
+          <span className={`ci-badge-status ci-${room.metrics.ciStatus}`}>
+            CI: {room.metrics.ciStatus === 'failing' ? 'failing' : room.metrics.ciStatus === 'passing' ? 'passing' : room.metrics.ciStatus === 'pending' ? 'pending' : room.metrics.ciStatus === 'not_run' ? 'not run' : 'unavailable'}
+            {room.metrics.ciCheckName ? ` (${room.metrics.ciCheckName})` : ''}
+            {room.metrics.ciUrl && (
+              <a
+                href={room.metrics.ciUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={room.metrics.ciCheckName || 'View GitHub CI run'}
+                style={{ marginLeft: 6, color: 'inherit', textDecoration: 'underline' }}
+              >
+                ↗
+              </a>
+            )}
+          </span>
+        )}
       </div>
+
+      {/* Detected Dependencies */}
+      {room.dependencies && room.dependencies.length > 0 && (
+        <div className="room-detail-dependencies" style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase' }}>
+            Derived Dependencies ({room.dependencies.length}):
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {room.dependencies.map((dep) => (
+              <span
+                key={dep}
+                style={{
+                  background: '#2B2220',
+                  border: '1px solid #483835',
+                  color: '#D4C5B9',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.72rem',
+                  fontFamily: 'ui-monospace, monospace',
+                }}
+              >
+                {dep}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Associated Scanned Repository Files */}
+      {room.filePaths && room.filePaths.length > 0 && (
+        <div className="room-detail-file-paths" style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase' }}>
+            Associated Real Files ({room.filePaths.length}):
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              maxHeight: '100px',
+              overflowY: 'auto',
+              background: 'rgba(0, 0, 0, 0.25)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              border: '1px solid #3A2E2C',
+            }}
+          >
+            {room.filePaths.map((fp) => (
+              <span
+                key={fp}
+                style={{
+                  fontSize: '0.75rem',
+                  fontFamily: 'ui-monospace, monospace',
+                  color: '#E0D4CC',
+                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis',
+                  overflow: 'hidden',
+                }}
+                title={fp}
+              >
+                📄 {fp}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Action Button: Investigate This Room */}
       <div className="room-investigate-actions">

@@ -218,7 +218,7 @@ describe('GitHub Ingestion Module', () => {
       assert.strictEqual(scanRes.success, true);
       const house = mapScanResultToHouse(scanRes);
 
-      const gatewayRoom = house.rooms.find((r) => r.id === 'room-recommendations');
+      const gatewayRoom = house.rooms.find((r) => r.id === 'room-tests' || r.layer === 'gateway');
       assert.ok(gatewayRoom);
       // Finding a test file must evaluate to IMPLEMENTED, NEVER VERIFIED!
       assert.notStrictEqual(gatewayRoom.status, 'verified');

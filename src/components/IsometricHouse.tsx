@@ -5,6 +5,7 @@ interface IsometricHouseProps {
   rooms: ArchitecturalRoom[];
   selectedRoomId: string | null;
   onSelectRoom: (room: ArchitecturalRoom) => void;
+  foundationTechnologies?: string[];
 }
 
 const ORIGIN_X = 450;
@@ -25,6 +26,7 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
   rooms,
   selectedRoomId,
   onSelectRoom,
+  foundationTechnologies,
 }) => {
   // Foundation slab coordinates
   const foundation = {
@@ -97,14 +99,6 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
     toIso(roof.x + roof.w / 2, roof.y + roof.d, roof.peakZ),
   ];
 
-  // Room placement layout
-  // 4 rooms on main foundation floor
-  const roomCoordinates: Record<string, { x: number; y: number; w: number; d: number; h: number; z: number }> = {
-    'room-catalog': { x: -170, y: -130, w: 160, d: 120, h: 80, z: 0 },
-    'room-recommendations': { x: 10, y: -130, w: 160, d: 120, h: 80, z: 0 },
-    'room-auth': { x: -170, y: 10, w: 160, d: 120, h: 80, z: 0 },
-    'room-checkout': { x: 10, y: 10, w: 160, d: 120, h: 80, z: 0 },
-  };
 
   const getRoomStyles = (status: RoomStatus, isSelected: boolean) => {
     switch (status) {
@@ -252,139 +246,171 @@ export const IsometricHouse: React.FC<IsometricHouseProps> = ({
           letterSpacing="1.2"
           fontWeight="600"
           transform="rotate(18, 450, 480)"
+          pointerEvents="none"
         >
-          FOUNDATION: POSTGRESQL · DOCKER · REPO ROOT
+          {foundationTechnologies && foundationTechnologies.length > 0
+            ? `FOUNDATION: ${foundationTechnologies.slice(0, 3).map((t) => t.toUpperCase()).join(' · ')} · REPO ROOT`
+            : 'FOUNDATION: REPOSITORY ROOT · RUNTIME PLATFORM'}
         </text>
       </g>
 
-      {/* 3. Architectural Rooms */}
+      {/* 3. Architectural Rooms (Sorted back-to-front for proper isometric depth and hit testing) */}
       <g className="rooms-layer">
-        {rooms.map((room) => {
-          const coords = roomCoordinates[room.id] || {
-            x: room.coords.isoX,
-            y: room.coords.isoY,
-            w: room.coords.width,
-            d: room.coords.depth,
-            h: room.coords.height,
-            z: 0,
-          };
+        {[...rooms]
+          .sort((a, b) => {
+            const depthA = (a.coords?.isoX ?? 0) + (a.coords?.isoY ?? 0);
+            const depthB = (b.coords?.isoX ?? 0) + (b.coords?.isoY ?? 0);
+            return depthA - depthB;
+          })
+          .map((room) => {
+            const coords = {
+              x: room.coords?.isoX ?? 0,
+              y: room.coords?.isoY ?? 0,
+              w: room.coords?.width ?? 160,
+              d: room.coords?.depth ?? 120,
+              h: room.coords?.height ?? 80,
+              z: 0,
+            };
 
-          const isSelected = selectedRoomId === room.id;
-          const styles = getRoomStyles(room.status, isSelected);
+            const isSelected = selectedRoomId === room.id;
+            const styles = getRoomStyles(room.status, isSelected);
 
-          const rTop = [
-            toIso(coords.x, coords.y, coords.z + coords.h),
-            toIso(coords.x + coords.w, coords.y, coords.z + coords.h),
-            toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
-            toIso(coords.x, coords.y + coords.d, coords.z + coords.h),
-          ];
+            const rTop = [
+              toIso(coords.x, coords.y, coords.z + coords.h),
+              toIso(coords.x + coords.w, coords.y, coords.z + coords.h),
+              toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
+              toIso(coords.x, coords.y + coords.d, coords.z + coords.h),
+            ];
 
-          const rLeft = [
-            toIso(coords.x, coords.y + coords.d, coords.z),
-            toIso(coords.x + coords.w, coords.y + coords.d, coords.z),
-            toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
-            toIso(coords.x, coords.y + coords.d, coords.z + coords.h),
-          ];
+            const rLeft = [
+              toIso(coords.x, coords.y + coords.d, coords.z),
+              toIso(coords.x + coords.w, coords.y + coords.d, coords.z),
+              toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
+              toIso(coords.x, coords.y + coords.d, coords.z + coords.h),
+            ];
 
-          const rRight = [
-            toIso(coords.x + coords.w, coords.y, coords.z),
-            toIso(coords.x + coords.w, coords.y + coords.d, coords.z),
-            toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
-            toIso(coords.x + coords.w, coords.y, coords.z + coords.h),
-          ];
+            const rRight = [
+              toIso(coords.x + coords.w, coords.y, coords.z),
+              toIso(coords.x + coords.w, coords.y + coords.d, coords.z),
+              toIso(coords.x + coords.w, coords.y + coords.d, coords.z + coords.h),
+              toIso(coords.x + coords.w, coords.y, coords.z + coords.h),
+            ];
 
-          // Center coordinate for room label and badge
-          const centerIso = toIso(
-            coords.x + coords.w / 2,
-            coords.y + coords.d / 2,
-            coords.z + coords.h
-          );
+            // Center coordinate for room label and badge
+            const centerIso = toIso(
+              coords.x + coords.w / 2,
+              coords.y + coords.d / 2,
+              coords.z + coords.h
+            );
 
-          return (
-            <g
-              key={room.id}
-              className={`room-group ${isSelected ? 'selected' : ''}`}
-              onClick={() => onSelectRoom(room)}
-              style={{ cursor: 'pointer' }}
-            >
-              {/* Left Face */}
-              <polygon
-                points={polyPoints(rLeft)}
-                fill={styles.leftFill}
-                stroke={styles.stroke}
-                strokeWidth={isSelected ? '2' : '1.2'}
-                strokeDasharray={styles.dash}
-              />
+            return (
+              <g
+                key={room.id}
+                id={`room-node-${room.id}`}
+                className={`room-group ${isSelected ? 'selected' : ''}`}
+                onClick={() => onSelectRoom(room)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectRoom(room);
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`${room.name} (${room.status})`}
+                aria-pressed={isSelected}
+                style={{ cursor: 'pointer', outline: 'none' }}
+              >
+                {/* Left Face */}
+                <polygon
+                  points={polyPoints(rLeft)}
+                  fill={styles.leftFill}
+                  stroke={isSelected ? '#FFD166' : styles.stroke}
+                  strokeWidth={isSelected ? '2' : '1.2'}
+                  strokeDasharray={styles.dash}
+                />
 
-              {/* Right Face */}
-              <polygon
-                points={polyPoints(rRight)}
-                fill={styles.rightFill}
-                stroke={styles.stroke}
-                strokeWidth={isSelected ? '2' : '1.2'}
-                strokeDasharray={styles.dash}
-              />
+                {/* Right Face */}
+                <polygon
+                  points={polyPoints(rRight)}
+                  fill={styles.rightFill}
+                  stroke={isSelected ? '#FFD166' : styles.stroke}
+                  strokeWidth={isSelected ? '2' : '1.2'}
+                  strokeDasharray={styles.dash}
+                />
 
-              {/* Top Face */}
-              <polygon
-                points={polyPoints(rTop)}
-                fill={styles.topFill}
-                stroke={styles.stroke}
-                strokeWidth={isSelected ? '2' : '1.4'}
-                strokeDasharray={styles.dash}
-              />
-
-              {/* WIP Pattern overlay for under-construction rooms */}
-              {room.status === 'in_progress' && (
+                {/* Top Face */}
                 <polygon
                   points={polyPoints(rTop)}
-                  fill="url(#construction-stripe)"
-                  pointerEvents="none"
+                  fill={styles.topFill}
+                  stroke={isSelected ? '#FFE5A3' : styles.stroke}
+                  strokeWidth={isSelected ? '2.5' : '1.4'}
+                  strokeDasharray={styles.dash}
                 />
-              )}
 
-              {/* Room Name & Status Tag on Top Face */}
-              <g pointerEvents="none" transform={`translate(${centerIso.x}, ${centerIso.y - 10})`}>
-                <text
-                  x="0"
-                  y="-4"
-                  textAnchor="middle"
-                  fill="#E6DFDA"
-                  fontSize="11"
-                  fontWeight="600"
-                  fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
-                >
-                  {room.name}
-                </text>
-                <rect
-                  x="-36"
-                  y="5"
-                  width="72"
-                  height="16"
-                  rx="3"
-                  fill={styles.badgeBg}
-                  stroke={styles.stroke}
-                  strokeWidth="0.8"
-                />
-                <text
-                  x="0"
-                  y="16"
-                  textAnchor="middle"
-                  fill={styles.badgeColor}
-                  fontSize="9"
-                  fontFamily="ui-monospace, monospace"
-                  fontWeight="600"
-                >
-                  {styles.badgeText}
-                </text>
+                {/* Highlight outline when selected */}
+                {isSelected && (
+                  <polygon
+                    points={polyPoints(rTop)}
+                    fill="none"
+                    stroke="#FFD166"
+                    strokeWidth="3.5"
+                    opacity="0.8"
+                    pointerEvents="none"
+                  />
+                )}
+
+                {/* WIP Pattern overlay for under-construction rooms */}
+                {room.status === 'in_progress' && (
+                  <polygon
+                    points={polyPoints(rTop)}
+                    fill="url(#construction-stripe)"
+                    pointerEvents="none"
+                  />
+                )}
+
+                {/* Room Name & Status Tag on Top Face */}
+                <g pointerEvents="none" transform={`translate(${centerIso.x}, ${centerIso.y - 10})`}>
+                  <text
+                    x="0"
+                    y="-4"
+                    textAnchor="middle"
+                    fill="#E6DFDA"
+                    fontSize="11"
+                    fontWeight="600"
+                    fontFamily="-apple-system, BlinkMacSystemFont, sans-serif"
+                  >
+                    {room.name}
+                  </text>
+                  <rect
+                    x="-36"
+                    y="5"
+                    width="72"
+                    height="16"
+                    rx="3"
+                    fill={styles.badgeBg}
+                    stroke={isSelected ? '#FFD166' : styles.stroke}
+                    strokeWidth="0.8"
+                  />
+                  <text
+                    x="0"
+                    y="16"
+                    textAnchor="middle"
+                    fill={styles.badgeColor}
+                    fontSize="9"
+                    fontFamily="ui-monospace, monospace"
+                    fontWeight="600"
+                  >
+                    {styles.badgeText}
+                  </text>
+                </g>
               </g>
-            </g>
-          );
-        })}
+            );
+          })}
       </g>
 
       {/* 4. Roof Structure (Transparent architectural canopy / trusses) */}
-      <g className="roof-structure" opacity="0.85">
+      <g className="roof-structure" opacity="0.85" pointerEvents="none">
         {/* Support columns from rooms up to roof */}
         <line
           x1={toIso(-170, -130, 80).x}

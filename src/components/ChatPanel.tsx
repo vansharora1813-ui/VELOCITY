@@ -40,6 +40,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     },
   ]);
 
+  const currentProjectKey = isSampleActive
+    ? 'sample:booknook-demo'
+    : `${scanResult?.owner}/${scanResult?.repo}@${scanResult?.commitSha ? scanResult.commitSha.slice(0, 7) : 'latest'}`;
+  const prevProjectKeyRef = useRef(currentProjectKey);
+
+  useEffect(() => {
+    if (prevProjectKeyRef.current !== currentProjectKey) {
+      prevProjectKeyRef.current = currentProjectKey;
+      setMessages([
+        {
+          id: `reset-dog-${Date.now()}`,
+          sender: 'dog',
+          text: isSampleActive
+            ? "Woof! Switched to sample BookNook repository. Previous conversation cleared."
+            : `Woof! Switched project to ${currentProjectKey}. Previous conversation cleared. Ask me anything about this repository's architecture!`,
+          timestamp: 'Reset',
+        },
+        {
+          id: `reset-cat-${Date.now()}`,
+          sender: 'cat',
+          text: isSampleActive
+            ? "Showing sample architecture. All claims will be matched against sample data."
+            : `Project ${currentProjectKey} loaded. I will only accept real files and verified evidence from this scan.`,
+          timestamp: 'Reset',
+        },
+      ]);
+      setErrorMessage(null);
+      setSetupRequired(false);
+    }
+  }, [currentProjectKey, isSampleActive]);
+
   const [inputVal, setInputVal] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);

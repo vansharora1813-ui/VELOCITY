@@ -112,6 +112,11 @@ export const App: React.FC = () => {
               rooms={rooms}
               selectedRoomId={selectedRoom?.id ?? null}
               onSelectRoom={handleSelectRoom}
+              foundationTechnologies={
+                isSampleActive
+                  ? ['PostgreSQL', 'Docker']
+                  : (lastScanResult?.detectedTechnologies || [])
+              }
             />
 
             <RoomInspector

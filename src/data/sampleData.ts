@@ -1,4 +1,4 @@
-import { ArchitecturalRoom, ChatMessagePreview } from '../types';
+import type { ArchitecturalRoom, ChatMessagePreview } from '../types.ts';
 
 /**
  * Fallback demonstration dataset: BookNook bookstore application.
@@ -22,7 +22,7 @@ export const SAMPLE_ROOMS: ArchitecturalRoom[] = [
     description: 'User registration, JWT tokens, session cookies, and role access control.',
     evidence: 'Sample: 18/18 integration tests passed. Endpoints verified in test harness.',
     metrics: { testsPassed: 18, totalTests: 18, filesCount: 6 },
-    coords: { isoX: 0, isoY: 0, width: 140, height: 80, depth: 100 },
+    coords: { isoX: -170, isoY: 10, width: 160, height: 80, depth: 120 },
   },
   {
     id: 'room-catalog',
@@ -32,7 +32,7 @@ export const SAMPLE_ROOMS: ArchitecturalRoom[] = [
     description: 'PostgreSQL schema, ISBN indexing, search cache, and stock tracking.',
     evidence: 'Sample: Schema migrations verified. 24 unit tests passing.',
     metrics: { testsPassed: 24, totalTests: 24, filesCount: 12 },
-    coords: { isoX: 160, isoY: 0, width: 140, height: 80, depth: 100 },
+    coords: { isoX: -170, isoY: -130, width: 160, height: 80, depth: 120 },
   },
   {
     id: 'room-checkout',
@@ -42,7 +42,7 @@ export const SAMPLE_ROOMS: ArchitecturalRoom[] = [
     description: 'Cart persistence, Stripe webhook handling, discount code calculations.',
     evidence: 'Sample: Stripe webhook signature check failing in mock environment. In-flight work.',
     metrics: { testsPassed: 7, totalTests: 12, filesCount: 8 },
-    coords: { isoX: 0, isoY: 130, width: 140, height: 80, depth: 100 },
+    coords: { isoX: 10, isoY: 10, width: 160, height: 80, depth: 120 },
   },
   {
     id: 'room-recommendations',
@@ -52,7 +52,7 @@ export const SAMPLE_ROOMS: ArchitecturalRoom[] = [
     description: 'Vector embeddings and reader affinity clustering.',
     evidence: 'Sample: Architecture specification present in docs, but 0 implementation files exist.',
     metrics: { testsPassed: 0, totalTests: 0, filesCount: 0 },
-    coords: { isoX: 160, isoY: 130, width: 140, height: 80, depth: 100 },
+    coords: { isoX: 10, isoY: -130, width: 160, height: 80, depth: 120 },
   },
 ];
 

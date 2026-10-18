@@ -50,6 +50,7 @@ export interface GitHubCheckRun {
   completedAt?: string;
   isRelevantTestCheck: boolean;
   relevanceReason: string;
+  commitSha?: string;
 }
 
 export type VerificationEvidenceOutcome =

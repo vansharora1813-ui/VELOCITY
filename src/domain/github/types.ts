@@ -2,11 +2,15 @@
  * Typed structures for GitHub REST API interactions and bounded repository scanning.
  */
 
+import type { GitHubCheckRun } from '../lifecycle/types.ts';
+import type { EvaluateCiOutcomeResult } from '../lifecycle/ciEvaluator.ts';
+
 export type ScanStage =
   | 'idle'
   | 'validating'
   | 'fetching_metadata'
   | 'fetching_tree'
+  | 'fetching_checks'
   | 'inspecting_files'
   | 'mapping_architecture'
   | 'completed'
@@ -83,11 +87,14 @@ export interface GitHubScanResult {
   commitSha?: string;
   treeTruncated: boolean;
   totalFilesDiscovered: number;
+  discoveredFilePaths?: string[];
   inspectedFiles: InspectedFile[];
   skippedFiles: SkippedFile[];
   detectedTechnologies: string[];
   detectedManifests: string[];
   detectedArchitecturalLayers: string[];
+  checkRuns?: GitHubCheckRun[];
+  ciEvaluation?: EvaluateCiOutcomeResult;
   rateLimit?: RateLimitInfo;
   warnings: string[];
   error?: string;
