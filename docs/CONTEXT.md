@@ -35,7 +35,7 @@ All API keys remain server-side and are never exposed to Vite or client bundles.
 - **Provider**: Google Gemini REST API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`).
 - **Environment Variables**:
   - `GEMINI_API_KEY`: API key obtained from Google AI Studio.
-  - `AI_MODEL`: Optional model name (default: `gemini-1.5-flash`).
+  - `AI_MODEL`: Optional model name (default: `gemini-3.8-flash`).
 - **Local Dev & Preview**: Handled via Vite server middleware (`/api/chat`), with request size limits (100KB), timeouts (12s), and rate-limit handling.
 - **Missing Config Behavior**: If `GEMINI_API_KEY` is not present, the server returns `{ success: false, code: 'CONFIG_REQUIRED' }` and the chat panel displays an informative configuration notice. Hardcoded mock responses are never silently fabricated.
 
@@ -43,5 +43,7 @@ All API keys remain server-side and are never exposed to Vite or client bundles.
 - **Milestone T01 (Complete)**: Running Foundation + Visible House Shell. Minimum scaffold, isometric SVG house with foundation, pillars, rooms, roof, restrained dark coffee theme, preview chat panel with companion identities, and sample data status labeling.
 - **Milestone T02 (Complete)**: Evidence-Backed Project Status Engine. Typed domain models, deterministic 5-status derivation engine, requirement-level relevance, evidence history supersession, and 100% pure TypeScript unit tests.
 - **Milestone T03 (Complete)**: Real GitHub Repository Ingestion. Public repo URL validation, bounded Git tree scanning (up to 12 files), file filtering/prioritization, rate-limit parsing, telemetry drawer, and dynamic house mapping.
-- **Milestone T04 (Current - Complete)**: AI Group Chat + Dog & Cat Companions. Shared model call with multi-persona JSON replies, grounded repo context, secure server-side integration (`/api/chat`), pixel pet avatars, typing indicator, and untrusted repo data defense.
-- **Milestone T05**: Continuous Agent Sync & Export. Real-time updates as external coding agents commit changes, plus summary export.
+- **Milestone T04 (Complete)**: AI Group Chat + Dog & Cat Companions. Shared model call with multi-persona JSON replies, grounded repo context, secure server-side integration (`/api/chat`), pixel pet avatars, typing indicator, and untrusted repo data defense.
+- **Milestone T05 (Complete)**: Evidence-Backed Investigation & Repair Prompt Generation. Room-level investigation workflow (`POST /api/investigate`), structured finding schema (`IssueCategory`, `IssueSeverity`, `EvidenceClassification`), strict evidence validation against scanned files (fabricated path filtering, uninspected file marking, severity capping), copy-ready self-contained coding agent repair prompts (with acceptance criteria and investigation-first mode for weak evidence), and visual copy confirmation, maintaining the deterministic status engine boundary.
+- **Milestone T06 (Current - Complete)**: Fix Reporting, Repository Re-Inspection and Evidence-Based Verification. Read-only lifecycle completing repair workflow (`UserFixReport`, `reinspectForFix`), commit SHA/PR reference validation against active repository identity, commit change inspection and diff budget tracking, automated GitHub CI check run classification and functional test relevance evaluation, strict evidence provenance (`source_code` for inspected changes, `test_result` for real CI outcomes, `user_confirmation` for pasted text claims), deterministic status updates and failure supersession, and UI lifecycle card with companion dialogue and refresh actions.
+- **Milestone T07**: Continuous Agent Sync & Export. Real-time updates as external coding agents commit changes, plus summary export.

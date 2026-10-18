@@ -34,6 +34,13 @@ export const App: React.FC = () => {
     setSelectedRoom(mapped.rooms[0] || null);
   };
 
+  const handleRoomUpdated = (updatedRoom: ArchitecturalRoom) => {
+    setRooms((prevRooms) =>
+      prevRooms.map((r) => (r.id === updatedRoom.id ? updatedRoom : r))
+    );
+    setSelectedRoom(updatedRoom);
+  };
+
   const handleResetSample = () => {
     setRooms(SAMPLE_ROOMS);
     setSelectedRoom(SAMPLE_ROOMS[0]);
@@ -110,6 +117,9 @@ export const App: React.FC = () => {
             <RoomInspector
               room={selectedRoom}
               onClose={() => setSelectedRoom(null)}
+              scanResult={lastScanResult}
+              isSampleActive={isSampleActive}
+              onRoomUpdated={handleRoomUpdated}
             />
           </div>
         </section>

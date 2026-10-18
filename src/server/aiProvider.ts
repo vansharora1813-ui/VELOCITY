@@ -64,7 +64,16 @@ export async function executeAiChat(
   fetchFn: typeof fetch = fetch
 ): Promise<ChatApiResponse> {
   const apiKey = env.GEMINI_API_KEY || env.GOOGLE_GENAI_API_KEY || env.AI_API_KEY;
-  const model = env.AI_MODEL || 'gemini-1.5-flash';
+  const rawModel = (env.AI_MODEL || 'gemini-3.8-flash').trim();
+
+  if (!rawModel || !/^[a-zA-Z0-9_.-]+$/.test(rawModel)) {
+    return {
+      success: false,
+      code: 'CONFIG_REQUIRED',
+      error: `Invalid AI_MODEL configuration: "${rawModel}". Expected a valid model identifier like "gemini-3.8-flash".`,
+    };
+  }
+  const model = rawModel;
 
   if (!apiKey || apiKey.trim().length === 0) {
     return {
@@ -123,8 +132,20 @@ export async function executeAiChat(
     contents: conversationContents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 600,
+      maxOutputTokens: 800,
       responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            speaker: { type: 'STRING', enum: ['dog', 'cat'] },
+            text: { type: 'STRING' },
+            evidenceReference: { type: 'STRING' },
+          },
+          required: ['speaker', 'text'],
+        },
+      },
     },
   };
 
@@ -152,11 +173,29 @@ export async function executeAiChat(
     }
 
     if (!res.ok) {
-      // Ensure raw API key or full response URL is never echoed
+      let detailMsg = res.statusText || `HTTP ${res.status}`;
+      try {
+        const errorData = await res.json();
+        if (errorData?.error?.message) {
+          // Redact any accidental key query param
+          detailMsg = errorData.error.message.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
+        }
+      } catch {
+        // use statusText fallback
+      }
+
+      if (res.status === 404) {
+        return {
+          success: false,
+          code: 'PROVIDER_ERROR',
+          error: `AI model "${model}" is not found or unsupported by the provider: ${detailMsg}`,
+        };
+      }
+
       return {
         success: false,
         code: 'PROVIDER_ERROR',
-        error: `AI provider returned HTTP ${res.status}: ${res.statusText}`,
+        error: `AI provider error (HTTP ${res.status}): ${detailMsg}`,
       };
     }
 

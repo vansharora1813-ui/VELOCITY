@@ -129,6 +129,86 @@ describe('AI Companions & Provider Integration', () => {
       assert.match(res.error!, /rate limit reached/i);
     });
 
+    it('uses gemini-3.8-flash by default when AI_MODEL is not set', async () => {
+      let requestedUrl = '';
+      const mockFetch = async (url: string | URL | Request) => {
+        requestedUrl = url.toString();
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: JSON.stringify([{ speaker: 'dog', text: 'Hi!' }]) }] } }],
+          }),
+          { status: 200 }
+        );
+      };
+
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key' },
+        mockFetch as unknown as typeof fetch
+      );
+
+      assert.strictEqual(res.success, true);
+      assert.match(requestedUrl, /models\/gemini-3\.8-flash:generateContent/);
+    });
+
+    it('uses custom AI_MODEL when explicitly configured', async () => {
+      let requestedUrl = '';
+      const mockFetch = async (url: string | URL | Request) => {
+        requestedUrl = url.toString();
+        return new Response(
+          JSON.stringify({
+            candidates: [{ content: { parts: [{ text: JSON.stringify([{ speaker: 'dog', text: 'Hi!' }]) }] } }],
+          }),
+          { status: 200 }
+        );
+      };
+
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key', AI_MODEL: 'gemini-pro-test' },
+        mockFetch as unknown as typeof fetch
+      );
+
+      assert.strictEqual(res.success, true);
+      assert.match(requestedUrl, /models\/gemini-pro-test:generateContent/);
+    });
+
+    it('rejects invalid AI_MODEL format with clear configuration error', async () => {
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key', AI_MODEL: 'invalid model with spaces!' }
+      );
+
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.code, 'CONFIG_REQUIRED');
+      assert.match(res.error!, /Invalid AI_MODEL configuration/i);
+    });
+
+    it('provides clear error when provider rejects model as not found (HTTP 404)', async () => {
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 404,
+              message: 'models/obsolete-model is not found for API version v1beta',
+              status: 'NOT_FOUND',
+            },
+          }),
+          { status: 404, statusText: 'Not Found' }
+        );
+
+      const res = await executeAiChat(
+        { message: 'Hello' },
+        { GEMINI_API_KEY: 'test-key', AI_MODEL: 'obsolete-model' },
+        mockFetch as unknown as typeof fetch
+      );
+
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.code, 'PROVIDER_ERROR');
+      assert.match(res.error!, /AI model "obsolete-model" is not found or unsupported/i);
+      assert.match(res.error!, /models\/obsolete-model is not found/i);
+    });
+
     it('handles successful model response with valid companions dialogue', async () => {
       const mockFetch = async () =>
         new Response(
