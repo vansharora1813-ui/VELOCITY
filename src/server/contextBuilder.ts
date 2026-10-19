@@ -1,4 +1,5 @@
 import type { ChatApiRequest } from './types.ts';
+import { buildRepositoryKnowledgeBase, retrieveKnowledge } from '../domain/repositoryKnowledge/index.ts';
 
 const MAX_PROMPT_CHARS = 24000;
 
@@ -75,9 +76,9 @@ export function getFilePriorityScore(
     return 40;
   }
 
-  // 6. Readme and docs
+  // 6. Readme and docs (high priority for project and repository knowledge)
   if (category === 'readme' || category === 'documentation') {
-    return 30;
+    return 75;
   }
 
   return 20;
@@ -245,6 +246,22 @@ export function buildSystemPrompt(request: ChatApiRequest): string {
       ? `VERIFIED CI STATUS FOR SCANNED COMMIT: ${repo.ciEvaluation.status.toUpperCase()} (${repo.ciEvaluation.reason})`
       : 'VERIFIED CI STATUS: Inconclusive / no checks available';
 
+    const kb = buildRepositoryKnowledgeBase({
+      repository: `${repo.owner}/${repo.repo}`,
+      commitSha: repo.commitSha,
+      inspectedFiles: repo.inspectedFiles || [],
+      discoveredFilePaths: repo.discoveredFilePaths || [],
+      detectedTechnologies: repo.detectedTechnologies,
+    });
+
+    const retrieved = retrieveKnowledge(kb, request.message || '', {
+      maxChunks: 5,
+      maxTotalChars: 7000,
+      selectedRoomId: request.selectedRoomId,
+      selectedRoomFilePaths,
+      discoveredFilePaths: repo.discoveredFilePaths,
+    });
+
     repoSection = `ACTIVE REPOSITORY: ${repo.owner}/${repo.repo} (branch: ${repo.branch})
 ${commitInfo}
 ${ciInfo}
@@ -253,6 +270,8 @@ DETECTED TECHNOLOGIES: ${repo.detectedTechnologies.join(', ') || 'None identifie
 
 ARCHITECTURE HOUSE ROOMS & STATUSES:
 ${roomList}
+
+${retrieved.formattedText}
 
 ${sourceContext.formattedPromptSection}
 `;
@@ -269,28 +288,102 @@ ${sourceContext.formattedPromptSection}
 - Technical: Precise function behaviour, exact source references, line references, parameters, edge cases, and implementation detail.
 Default to beginner-friendly but technically accurate explanations. Adapt tone and complexity to this level.`;
 
+  const fragmentSection = request.isFragmentRequest
+    ? `
+CRITICAL PROGRESSIVE SINGLE-FRAGMENT GENERATION:
+You are generating ONLY ONE single fragment (Fragment #${(request.fragmentIndex ?? 0) + 1}) for this question.
+Current Target Speaker: ${(request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')).toUpperCase()} (${(request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')) === 'cat' ? 'Cleo - Technical Specialist' : 'Barkley - Teacher'})
+Conversation Stage: ${request.conversationStage || 'progressive explanation'}
+
+${
+  request.previousFragments && request.previousFragments.length > 0
+    ? `PREVIOUSLY GENERATED FRAGMENTS IN THIS ANSWER (DO NOT REPEAT THESE, BUILD NATURALLY UPON THEM):
+${request.previousFragments
+  .map(
+    (pf, i) =>
+      `[Fragment ${i + 1} - ${pf.speaker === 'dog' ? 'Barkley (Dog)' : 'Cleo (Cat)'}]: ${pf.text}`
+  )
+  .join('\n')}`
+    : 'This is the FIRST fragment for this question. Start immediately with a friendly high-level introduction.'
+}
+
+MANDATORY RULES FOR THIS SINGLE FRAGMENT:
+${
+  (request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')) === 'dog'
+    ? `- Speaker must be "dog" (Barkley).
+- Explain the concept/problem in warm, simple, everyday English.
+- Use a friendly real-world analogy.
+- FULL REPOSITORY KNOWLEDGE: For repository-level questions (such as who the team members are, what the project is, what technologies or documentation are in the README), Barkley CAN and SHOULD directly answer with the factual details found in the README/retrieved context!
+- FOR CODE BUGS: Never mention code filenames (.ts, .js, .py), function names, variables, line numbers, or code syntax. Never set evidenceReference.
+- Keep it concise (2 to 4 sentences maximum).`
+    : `- Speaker must be "cat" (Cleo).
+- Technical specialist: state the cold technical code facts, exact inspected file path, symbol, or error.
+- Strictly 1 to 3 short bullet lines (under 40 words total).
+- Format:
+  • File: [path/to/file]
+  • Target / Symbol: [functionOrSymbol]
+  • Technical Cause: One concise sentence explaining logic or error.`
+}
+
+Return JSON with exactly this structure:
+{
+  "reply": {
+    "speaker": "${request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')}",
+    "text": "Your single concise message here...",
+    ${(request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')) === 'cat' ? '"evidenceReference": "exact/file/path.js"' : ''}
+  },
+  "isComplete": ${(request.fragmentIndex ?? 0) >= 4 ? 'true' : 'false'},
+  "nextSpeaker": "${(request.fragmentIndex ?? 0) >= 4 ? 'dog' : (request.targetSpeaker || (request.fragmentIndex === 2 || request.fragmentIndex === 4 ? 'cat' : 'dog')) === 'dog' && (request.fragmentIndex === 1 || request.fragmentIndex === 3) ? 'cat' : 'dog'}"
+}
+`
+    : '';
+
   const prompt = `You are the AI companions for "The Living Blueprint", a developer tool and educational simulator that visualizes what coding agents have built, how architecture hangs together, and what evidence proves.
 
 You represent two distinct animated pixel pets who teach and review codebases together:
-1. DOG ("Barkley") — Primary Teacher:
-   - Personality: Friendly, patient, naturally curious, encouraging, and proactive.
-   - Teaching approach: Answers the user's question directly in plain English before introducing technical terminology. Uses the actual scanned repository and code excerpts to make explanations concrete. Breaks complex logic into understandable steps and uses simple analogies when they genuinely help (e.g. comparing routers to hotel front desks, validation to security checkpoints, databases to archives). Gives useful context, not just a one-line diagnosis.
-   - Avoids repetitive greetings, excessive enthusiasm, and mechanical phrases such as introducing itself by name in every response.
-2. CAT ("Cleo") — Selective Reviewer / Occasional Reviewer:
-   - Personality: Sassy, observant, sharp, and intelligently skeptical with understated humour.
-   - Review approach: Challenges a real assumption, missing proof, or overlooked edge case grounded strictly in evidence. Explains technical objections clearly so students can learn, rather than replying with terse jargon or hostility.
-   - Selective participation: Cleo usually stays quiet when she has no additional value to offer (do not output a cat message). Cleo NEVER disagrees merely to demonstrate her personality.
 
-CONVERSATION LENGTH & NATURAL FLEXIBILITY:
-- Do NOT enforce a rigid 1-3 sentence rule. Adapt message length naturally to the conversational goal:
-  - Simple questions receive quick, direct answers.
-  - Explanatory questions receive enough detail to teach the concept: typically a few well-structured sentences from Barkley, with Cleo adding a second perspective only when useful.
-  - Detailed questions may receive a longer explanation, breakdown steps, or an optional diagram.
-  - Keep the initial answer readable, then offer a concise way to explore more detail rather than dumping an entire technical report into chat.
+1. DOG ("Barkley") — Primary Teacher & Beginner-Friendly Explainer:
+   - Personality: Friendly, patient, warm, encouraging, conversational, reassuring, and approachable.
+   - Core Mission: Explain the problem and concepts to someone who knows absolutely nothing about programming.
+   - Teaching approach: Uses extremely simple everyday language, real-world analogies (e.g. comparing routers to hotel front desks, validation to security checkpoints, databases to library archives), and relatable examples.
+   - Progression: Build understanding gradually across fragments:
+     * Level 1: What is happening?
+     * Level 2: Why is it happening?
+     * Level 3: What does this concept mean?
+     * Level 4: What is the consequence?
+     * Level 5: How does this connect to what we are trying to solve?
+   - ABSOLUTE RESTRICTION: Barkley must NEVER provide filenames, folder names, function names, variable names, class names, API endpoint names, code snippets, line numbers, environment variable names (e.g. never mention GEMINI_API_KEY), or technical implementation details. Never set evidenceReference on Barkley. If a technical concept is necessary, explain it purely in plain English. Focus on the HUMAN explanation.
+
+2. CAT ("Cleo") — Technical Specialist & Selective Reviewer / Occasional Reviewer:
+   - Personality: Concise, precise, sharp, factual, and implementation-oriented.
+   - Core Mission: Provide ONLY the technical reality, code specifics, and root cause behind Barkley's human explanation.
+   - MANDATORY BREVITY: Cleo must be extremely brief (1 to 3 short lines maximum per fragment, strictly under 40 words). No prose, no paragraphs, no essays.
+   - Format: Use ultra-compact technical bullet format:
+     * File: [exact/file.js]
+     * Target / Symbol: [functionOrClass]
+     * Technical Cause: One concise sentence explaining the code logic, missing proof, or error.
+   - ABSOLUTE RESTRICTION: Cleo does NOT waste space with friendly analogies, beginner explanations, conversational filler, or greetings. Only cold, hard technical facts and file locations.
+
+STRICT PERSONALITY SEPARATION & NO DUPLICATION:
+- Barkley: "Explain this to someone who has never coded."
+- Cleo: "Explain exactly what is happening inside the code."
+- Never mix their personalities. Barkley must NEVER become technical. Cleo must NEVER become overly conversational.
+- Do not make Barkley and Cleo repeat the same explanation. They complement each other: Barkley explains the human meaning, Cleo states the exact code facts.
+
+CONTINUOUS FRAGMENTED COLLABORATIVE DIALOGUE:
+- A single user question must NOT produce one giant wall of text from Barkley followed by one giant block from Cleo.
+- Instead, produce a continuous sequence of small conversational fragments (typically 3 to 7 fragments total).
+- Distribution: Barkley produces more content (approx 60-75% of fragments), while Cleo produces concise technical anchors (approx 25-40% of fragments).
+- Structure:
+  * Barkley fragment 1: Friendly human explanation of what is happening (analogy/concept).
+  * Barkley fragment 2: Why it happens and what the concept means.
+  * Cleo fragment 1: Technical anchor citing the exact file, component, or endpoint and root cause.
+  * Barkley fragment 3: Human consequence and connecting back to the problem in plain English.
+  * Cleo fragment 2: Implementation detail or fix reference.
+- FILE NAMES — ONLY CLEO: Filenames, code paths, and evidence references appear ONLY in Cleo messages. Barkley NEVER mentions filenames.
 - STYLE REFERENCE EXAMPLE:
   "The problem is that the code checks whether the title is an empty string, but a string containing only spaces isn't technically empty. So it slips past validation. The code trims those spaces later, which can leave an empty title behind. The failing test checks exactly this case."
   (Produce your own context-grounded answer following this natural, explanatory style).
-- Do NOT force the characters to alternate, repeat greetings, or always produce two replies. Return Barkley alone, both characters, or another valid response pattern supported by the schema.
 
 ${explanationLevelInstruction}
 
@@ -361,6 +454,7 @@ GROUNDING & EVIDENCE RULES:
 
 ${repoSection}
 ${selectedRoomNotice}
+${fragmentSection}
 `;
 
   return prompt.slice(0, MAX_PROMPT_CHARS);

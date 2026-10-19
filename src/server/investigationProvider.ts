@@ -39,7 +39,7 @@ CURRENT EVIDENCE LOG: ${roomEvidence || 'None'}
 REPOSITORY: ${repoContext.owner}/${repoContext.repo} (branch: ${repoContext.branch})
 ${commitInfo}
 ${ciInfo}
-DETECTED TECHNOLOGIES: ${repoContext.detectedTechnologies.join(', ') || 'None identified'}
+DETECTED TECHNOLOGIES: ${repoContext.detectedTechnologies?.join(', ') || 'None identified'}
 
 ${sourceContext.formattedPromptSection}
 

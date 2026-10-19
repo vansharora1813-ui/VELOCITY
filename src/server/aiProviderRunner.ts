@@ -6,7 +6,7 @@ import {
 } from './errorClassifier.ts';
 import type { AiErrorInfo } from './types.ts';
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
 export const DEFAULT_GROQ_MODEL = 'qwen/qwen3.8-27b';
 export const GROQ_API_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -32,7 +32,10 @@ export function getProviderConfigs(
   env: Record<string, string | undefined> = process.env
 ): ProviderConfigs {
   const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_GENAI_API_KEY || env.AI_API_KEY;
-  const geminiModel = (env.AI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+  let geminiModel = (env.AI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+  if (geminiModel === 'gemini-3.8-flash') {
+    geminiModel = 'gemini-3.7-flash';
+  }
   const thinkingConfig = getThinkingConfig(env);
 
   const groqKey = env.GROQ_API_KEY;
@@ -62,6 +65,7 @@ export interface AiExecutionRequest {
   systemInstruction: string;
   messages: AiProviderMessage[];
   temperature: number;
+  maxOutputTokens?: number;
   responseSchema?: unknown;
   feature: 'chat' | 'investigation';
   overallTimeoutMs?: number;
@@ -278,6 +282,37 @@ export async function executeAiWithFallback(
             errorMsg = errorInfo.detailSafe || `AI provider rejected request (HTTP ${res.status})`;
           }
 
+          if (res.status === 503 && configs.gemini.model !== 'gemini-3.7-flash') {
+            try {
+              const retryUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${configs.gemini.apiKey}`;
+              const retryRes = await fetchFn(retryUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal,
+              });
+              if (retryRes.ok) {
+                const retryData = await retryRes.json();
+                const retryPart = retryData.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (retryPart && retryPart.trim().length > 0) {
+                  return {
+                    success: true,
+                    rawText: retryPart,
+                    providerUsed: 'gemini',
+                    upstreamMs: Date.now() - attemptStart,
+                    promptTokens: retryData.usageMetadata?.promptTokenCount,
+                    candidatesTokens: retryData.usageMetadata?.candidatesTokenCount,
+                    totalTokens: retryData.usageMetadata?.totalTokenCount,
+                    thinkingLevel: configs.gemini.thinkingLevel,
+                    finishReason: retryData.candidates?.[0]?.finishReason,
+                  };
+                }
+              }
+            } catch {
+              // fall through to standard error handling
+            }
+          }
+
           geminiFailure = { status: res.status, errorInfo, errorMsg };
         }
       } catch (fetchErr) {
@@ -311,7 +346,7 @@ export async function executeAiWithFallback(
           model: configs.groq.model,
           messages: groqMessages,
           temperature: req.temperature,
-          max_tokens: 4096,
+          max_tokens: req.maxOutputTokens ? Math.min(req.maxOutputTokens, 1000) : 1000,
           response_format: { type: 'json_object' },
         };
 

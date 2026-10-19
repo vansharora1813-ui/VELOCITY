@@ -4,11 +4,15 @@ import type {
   ChatApiRequest,
   ChatApiResponse,
   CompanionReplyMessage,
+  CompanionSpeaker,
   WorkflowDiagram,
 } from './types.ts';
 
 export interface ValidatedChatResponse {
   replies: CompanionReplyMessage[];
+  reply?: CompanionReplyMessage;
+  isComplete?: boolean;
+  nextSpeaker?: CompanionSpeaker;
   workflowDiagram?: WorkflowDiagram;
 }
 
@@ -31,6 +35,8 @@ export function parseAndValidateChatResponse(
 
   let rawReplies: unknown;
   let rawWorkflowDiagram: unknown;
+  let isComplete: boolean | undefined;
+  let nextSpeaker: 'dog' | 'cat' | undefined;
 
   if (Array.isArray(parsed)) {
     rawReplies = parsed;
@@ -43,8 +49,22 @@ export function parseAndValidateChatResponse(
     }
   } else if (parsed && typeof parsed === 'object') {
     const obj = parsed as Record<string, unknown>;
-    rawReplies = obj.replies;
+    if (Array.isArray(obj.replies)) {
+      rawReplies = obj.replies;
+    } else if (obj.reply && typeof obj.reply === 'object') {
+      rawReplies = [obj.reply];
+    } else if (typeof obj.speaker === 'string' && typeof obj.text === 'string') {
+      rawReplies = [obj];
+    } else {
+      rawReplies = obj.replies;
+    }
     rawWorkflowDiagram = obj.workflowDiagram;
+    if (typeof obj.isComplete === 'boolean') {
+      isComplete = obj.isComplete;
+    }
+    if (obj.nextSpeaker === 'dog' || obj.nextSpeaker === 'cat') {
+      nextSpeaker = obj.nextSpeaker;
+    }
   } else {
     throw new Error('Model output must be a JSON array of messages or an object containing replies.');
   }
@@ -59,8 +79,9 @@ export function parseAndValidateChatResponse(
 
   const validSpeakers = new Set(['dog', 'cat']);
   const validatedReplies: CompanionReplyMessage[] = [];
+  const inspectedPaths = repoContext?.inspectedFiles?.map((f) => f.path).filter(Boolean) || [];
 
-  for (const item of rawReplies.slice(0, 2)) {
+  for (const item of rawReplies.slice(0, 16)) {
     if (!item || typeof item !== 'object') {
       throw new Error('Message entry must be an object.');
     }
@@ -79,9 +100,29 @@ export function parseAndValidateChatResponse(
       rawWorkflowDiagram = itemDiagram;
     }
 
+    const normalizedSpeaker = speaker.toLowerCase() as 'dog' | 'cat';
+    let cleanText = text.trim();
+
+    // Cat (Cleo) responses must be ultra-concise and technical (bound to 350 chars max)
+    if (normalizedSpeaker === 'cat') {
+      cleanText = cleanText.slice(0, 350);
+    } else {
+      cleanText = cleanText.slice(0, 1500);
+    }
+
+    // Safeguard: Barkley must never provide filenames or file paths
+    if (normalizedSpeaker === 'dog' && inspectedPaths.length > 0) {
+      for (const p of inspectedPaths) {
+        if (cleanText.includes(p)) {
+          cleanText = cleanText.split(`\`${p}\``).join('the relevant code')
+                               .split(p).join('the relevant code');
+        }
+      }
+    }
+
     validatedReplies.push({
-      speaker: speaker.toLowerCase() as 'dog' | 'cat',
-      text: text.trim().slice(0, 1500), // Bounded length allowing natural explanations
+      speaker: normalizedSpeaker,
+      text: cleanText,
       evidenceReference:
         typeof evidenceReference === 'string' && evidenceReference.trim().length > 0
           ? evidenceReference.trim().slice(0, 150)
@@ -103,6 +144,9 @@ export function parseAndValidateChatResponse(
 
   return {
     replies: validatedReplies,
+    reply: validatedReplies[0],
+    isComplete,
+    nextSpeaker,
     workflowDiagram: validatedDiagram,
   };
 }
@@ -175,75 +219,104 @@ export async function executeAiChat(
     text: userMessage,
   });
 
-  const chatResponseSchema = {
-    type: 'OBJECT',
-    properties: {
-      replies: {
-        type: 'ARRAY',
-        items: {
-          type: 'OBJECT',
-          properties: {
-            speaker: { type: 'STRING', enum: ['dog', 'cat'] },
-            text: { type: 'STRING' },
-            evidenceReference: { type: 'STRING' },
-          },
-          required: ['speaker', 'text'],
-        },
-      },
-      workflowDiagram: {
+  const chatResponseSchema = request.isFragmentRequest
+    ? {
         type: 'OBJECT',
         properties: {
-          id: { type: 'STRING' },
-          title: { type: 'STRING' },
-          explanation: { type: 'STRING' },
-          simulationType: { type: 'STRING' },
-          nodes: {
-            type: 'ARRAY',
-            items: {
-              type: 'OBJECT',
-              properties: {
-                id: { type: 'STRING' },
-                label: { type: 'STRING' },
-                role: { type: 'STRING' },
-                nodeType: { type: 'STRING', enum: ['component', 'decision', 'storage', 'external', 'step'] },
-                roomId: { type: 'STRING' },
-                filePath: { type: 'STRING' },
-                classification: { type: 'STRING', enum: ['observed', 'inferred'] },
-                description: { type: 'STRING' },
-                inputs: { type: 'STRING' },
-                outputs: { type: 'STRING' },
-              },
-              required: ['id', 'label', 'classification', 'description'],
+          reply: {
+            type: 'OBJECT',
+            properties: {
+              speaker: { type: 'STRING', enum: ['dog', 'cat'] },
+              text: { type: 'STRING' },
+              evidenceReference: { type: 'STRING' },
             },
+            required: ['speaker', 'text'],
           },
-          edges: {
+          replies: {
             type: 'ARRAY',
             items: {
               type: 'OBJECT',
               properties: {
-                from: { type: 'STRING' },
-                to: { type: 'STRING' },
-                label: { type: 'STRING' },
-                branchLabel: { type: 'STRING' },
-                classification: { type: 'STRING', enum: ['observed', 'inferred'] },
+                speaker: { type: 'STRING', enum: ['dog', 'cat'] },
+                text: { type: 'STRING' },
                 evidenceReference: { type: 'STRING' },
               },
-              required: ['from', 'to', 'classification'],
+              required: ['speaker', 'text'],
             },
           },
-          uncertainties: { type: 'STRING' },
+          isComplete: { type: 'BOOLEAN' },
+          nextSpeaker: { type: 'STRING', enum: ['dog', 'cat'] },
         },
-        required: ['title', 'explanation', 'nodes', 'edges'],
-      },
-    },
-    required: ['replies'],
-  };
+      }
+    : {
+        type: 'OBJECT',
+        properties: {
+          replies: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                speaker: { type: 'STRING', enum: ['dog', 'cat'] },
+                text: { type: 'STRING' },
+                evidenceReference: { type: 'STRING' },
+              },
+              required: ['speaker', 'text'],
+            },
+          },
+          workflowDiagram: {
+            type: 'OBJECT',
+            properties: {
+              id: { type: 'STRING' },
+              title: { type: 'STRING' },
+              explanation: { type: 'STRING' },
+              simulationType: { type: 'STRING' },
+              nodes: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    id: { type: 'STRING' },
+                    label: { type: 'STRING' },
+                    role: { type: 'STRING' },
+                    nodeType: { type: 'STRING', enum: ['component', 'decision', 'storage', 'external', 'step'] },
+                    roomId: { type: 'STRING' },
+                    filePath: { type: 'STRING' },
+                    classification: { type: 'STRING', enum: ['observed', 'inferred'] },
+                    description: { type: 'STRING' },
+                    inputs: { type: 'STRING' },
+                    outputs: { type: 'STRING' },
+                  },
+                  required: ['id', 'label', 'classification', 'description'],
+                },
+              },
+              edges: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    from: { type: 'STRING' },
+                    to: { type: 'STRING' },
+                    label: { type: 'STRING' },
+                    branchLabel: { type: 'STRING' },
+                    classification: { type: 'STRING', enum: ['observed', 'inferred'] },
+                    evidenceReference: { type: 'STRING' },
+                  },
+                  required: ['from', 'to', 'classification'],
+                },
+              },
+              uncertainties: { type: 'STRING' },
+            },
+            required: ['title', 'explanation', 'nodes', 'edges'],
+          },
+        },
+        required: ['replies'],
+      };
 
   const outcome = await executeAiWithFallback(
     {
       systemInstruction,
       messages: conversationContents,
-      temperature: 0.7,
+      temperature: 0.35,
       responseSchema: chatResponseSchema,
       feature: 'chat',
       overallTimeoutMs: 20000,
@@ -264,22 +337,30 @@ export async function executeAiChat(
 
   const validationStart = Date.now();
   let replies: CompanionReplyMessage[];
+  let reply: CompanionReplyMessage | undefined;
+  let isComplete: boolean | undefined;
+  let nextSpeaker: CompanionSpeaker | null | undefined;
   let workflowDiagram: WorkflowDiagram | undefined;
   let parseWarning: string | undefined;
 
   try {
     const validated = parseAndValidateChatResponse(outcome.rawText, request.repoContext);
     replies = validated.replies;
+    reply = validated.reply || validated.replies[0];
+    isComplete = validated.isComplete;
+    nextSpeaker = validated.nextSpeaker;
     workflowDiagram = validated.workflowDiagram;
   } catch (parseErr: unknown) {
     const msg = parseErr instanceof Error ? parseErr.message : 'Invalid response format';
     // Graceful fallback for plain-text model responses without inventing dialogue
+    const fallbackSpeaker: CompanionSpeaker = request.targetSpeaker || 'dog';
     replies = [
       {
-        speaker: 'dog',
+        speaker: fallbackSpeaker,
         text: outcome.rawText.slice(0, 300),
       },
     ];
+    reply = replies[0];
     parseWarning = `Warning: ${msg}`;
   }
 
@@ -304,6 +385,9 @@ export async function executeAiChat(
   return {
     success: true,
     replies,
+    reply: reply || replies[0],
+    isComplete,
+    nextSpeaker,
     workflowDiagram,
     providerUsed: outcome.providerUsed,
     provider: outcome.providerUsed,

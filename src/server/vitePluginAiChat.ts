@@ -7,11 +7,18 @@ import { loadEnv } from 'vite';
 
 export function vitePluginAiChat(env?: Record<string, string | undefined>): Plugin {
   const attachMiddleware = (server: ViteDevServer | PreviewServer) => {
-    const getActiveEnv = () => ({
-      ...process.env,
-      ...loadEnv(process.env.NODE_ENV || 'development', process.cwd(), ''),
-      ...env,
-    });
+    const getActiveEnv = () => {
+      const freshEnv = loadEnv(process.env.NODE_ENV || 'development', process.cwd(), '');
+      if (freshEnv.GEMINI_API_KEY) process.env.GEMINI_API_KEY = freshEnv.GEMINI_API_KEY;
+      if (freshEnv.AI_MODEL) process.env.AI_MODEL = freshEnv.AI_MODEL;
+      if (freshEnv.GROQ_API_KEY) process.env.GROQ_API_KEY = freshEnv.GROQ_API_KEY;
+      if (freshEnv.GROQ_MODEL) process.env.GROQ_MODEL = freshEnv.GROQ_MODEL;
+      return {
+        ...env,
+        ...process.env,
+        ...freshEnv,
+      };
+    };
 
     server.middlewares.use('/api/health', (req, res) => {
       handleHealthApiRequest(req, res, getActiveEnv()).catch((err) => {

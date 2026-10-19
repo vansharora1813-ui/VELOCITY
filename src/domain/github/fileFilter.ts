@@ -138,9 +138,24 @@ export function scoreFileForInspection(path: string): number {
     return lower.includes('/') ? 95 : 100;
   }
 
-  // 3. Root README
-  if (category === 'readme' && !lower.includes('/')) {
-    return 92;
+  // 3. README files (root and subdirectories)
+  if (category === 'readme') {
+    return lower.includes('/') ? 91 : 92;
+  }
+
+  // 3b. Key documentation files (docs, contributing, architecture, team)
+  if (category === 'documentation') {
+    if (
+      lower.includes('team') ||
+      lower.includes('contribut') ||
+      lower.includes('architect') ||
+      lower.includes('overview') ||
+      lower.includes('guide') ||
+      lower.includes('about')
+    ) {
+      return 89;
+    }
+    return 80;
   }
 
   // 4. Core entry points

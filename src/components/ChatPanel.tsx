@@ -4,6 +4,7 @@ import { WorkflowDiagramView } from './WorkflowDiagramView.tsx';
 import { AiUsageLimitNotice } from './AiUsageLimitNotice.tsx';
 import type { ArchitecturalRoom } from '../types.ts';
 import type {
+  ChatApiResponse,
   CompanionReplyMessage,
   CompanionSpeaker,
   ExecutionTimingMetadata,
@@ -51,13 +52,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       {
         id: 'init-dog',
         sender: 'dog',
-        text: "Hi! I'm here to help you understand this project's architecture, follow data flows through each room, and make sense of the scanned code.",
+        text: "Hi! I'm Barkley. I'm here to explain how this project works in simple, friendly terms with analogies—no overwhelming code jargon!",
         timestamp: 'Ready',
       },
       {
         id: 'init-cat',
         sender: 'cat',
-        text: "And I'm Cleo. I review the claims against actual source files and CI check runs, so we don't guess.",
+        text: "And I'm Cleo. I provide the exact technical implementation, file locations, and verified code facts from the scanned repository.",
         timestamp: 'Ready',
       },
     ];
@@ -67,10 +68,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     ? 'sample:booknook-demo'
     : `${scanResult?.owner}/${scanResult?.repo}@${scanResult?.commitSha ? scanResult.commitSha.slice(0, 7) : 'latest'}`;
   const prevProjectKeyRef = useRef(currentProjectKey);
+  const [activeTypingSpeaker, setActiveTypingSpeaker] = useState<CompanionSpeaker | null>(null);
+  const revealCancelledRef = useRef(false);
 
   useEffect(() => {
     if (prevProjectKeyRef.current !== currentProjectKey) {
       prevProjectKeyRef.current = currentProjectKey;
+      revealCancelledRef.current = true;
+      setActiveTypingSpeaker(null);
       if (initialMessages && initialMessages.length > 0) {
         setMessages(initialMessages);
       } else {
@@ -115,11 +120,102 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<unknown>(null);
+
+  const handleToggleVoiceInput = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          (recognitionRef.current as { stop: () => void }).stop();
+        } catch {
+          // ignore
+        }
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as unknown as { SpeechRecognition?: new () => any }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setErrorMessage('Speech recognition is not supported in this browser. Please type your message.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: { resultIndex: number; results: Array<Array<{ transcript: string }>> }) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setInputVal((prev) => {
+            const trimmedPrev = prev.trim();
+            return trimmedPrev ? `${trimmedPrev} ${transcript}` : transcript;
+          });
+        }
+      };
+
+      recognition.onerror = (event: { error: string }) => {
+        setIsListening(false);
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          setErrorMessage(`Voice input error: ${event.error || 'microphone unavailable'}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: unknown) {
+      setIsListening(false);
+      const msg = err instanceof Error ? err.message : 'Microphone error';
+      setErrorMessage(`Could not start voice input: ${msg}`);
+    }
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          (recognitionRef.current as { abort: () => void }).abort();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceToBottom < 80;
+  };
+
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoading, activeTypingSpeaker]);
 
   // Generate adaptive contextual suggestion chips
   const suggestionChips: Array<{ label: string; query: string }> = [];
@@ -212,7 +308,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       currentMessageId = messages[messages.length - 1]?.id || '';
     }
 
+    revealCancelledRef.current = false;
     setIsLoading(true);
+    setActiveTypingSpeaker('dog');
     setErrorMessage(null);
     setErrorInfo(null);
     const requestProjectKey = currentProjectKey;
@@ -308,58 +406,110 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         speaker: m.sender !== 'user' ? m.sender : undefined,
       }));
 
+    const fragmentPlan: Array<{
+      speaker: CompanionSpeaker;
+      stage: 'intro' | 'analogy' | 'technical_anchor' | 'human_recap' | 'technical_verification';
+    }> = [
+      { speaker: 'dog', stage: 'intro' },
+      { speaker: 'dog', stage: 'analogy' },
+      { speaker: 'cat', stage: 'technical_anchor' },
+      { speaker: 'dog', stage: 'human_recap' },
+      { speaker: 'cat', stage: 'technical_verification' },
+    ];
+
+    let accumulatedMessages = newMessages;
+    const generatedFragments: CompanionReplyMessage[] = [];
+
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: trimmed,
-          explanationLevel,
-          history: historyPayload,
-          selectedRoomId: selectedRoom?.id,
-          repoContext,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (prevProjectKeyRef.current !== requestProjectKey) {
-        // Discard late response if user switched repository during in-flight request
-        return;
-      }
-
-      if (!response.ok || !data.success) {
-        if (data.code === 'CONFIG_REQUIRED') {
-          setSetupRequired(true);
-        } else {
-          setErrorMessage(data.error || 'Failed to communicate with AI provider.');
-          setErrorInfo(data.errorInfo || null);
-          setFailedMessage(trimmed);
+      for (let stepIdx = 0; stepIdx < fragmentPlan.length; stepIdx++) {
+        if (revealCancelledRef.current || prevProjectKeyRef.current !== requestProjectKey) {
+          break;
         }
-        return;
+
+        const planStep = fragmentPlan[stepIdx];
+
+        // Immediately show typing indicator for the character who is generating this fragment
+        setActiveTypingSpeaker(planStep.speaker);
+
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: trimmed,
+            explanationLevel,
+            history: historyPayload,
+            selectedRoomId: selectedRoom?.id,
+            repoContext,
+            isFragmentRequest: true,
+            fragmentIndex: stepIdx,
+            targetSpeaker: planStep.speaker,
+            conversationStage: planStep.stage,
+            previousFragments: generatedFragments,
+          }),
+        });
+
+        if (revealCancelledRef.current || prevProjectKeyRef.current !== requestProjectKey) {
+          break;
+        }
+
+        const data: ChatApiResponse = await response.json();
+
+        if (revealCancelledRef.current || prevProjectKeyRef.current !== requestProjectKey) {
+          break;
+        }
+
+        if (!response.ok || !data.success) {
+          setActiveTypingSpeaker(null);
+          if (data.code === 'CONFIG_REQUIRED') {
+            setSetupRequired(true);
+          } else {
+            setErrorMessage(data.error || 'Failed to communicate with AI provider.');
+            setErrorInfo(data.errorInfo || null);
+            setFailedMessage(trimmed);
+          }
+          return;
+        }
+
+        const fragmentReply: CompanionReplyMessage | undefined = data.reply || data.replies?.[0];
+        if (!fragmentReply) {
+          break;
+        }
+
+        generatedFragments.push(fragmentReply);
+
+        // Immediately render THIS fragment as soon as it arrives! No artificial sleep!
+        const fragmentItem: ChatMessageItem = {
+          id: `reply-${Date.now()}-${stepIdx}-${Math.random().toString(36).slice(2, 6)}`,
+          sender: fragmentReply.speaker,
+          text: fragmentReply.text,
+          evidenceReference: fragmentReply.speaker === 'cat' ? fragmentReply.evidenceReference : undefined,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timing: data.timing,
+          workflowDiagram: fragmentReply.workflowDiagram || (stepIdx === 0 ? data.workflowDiagram : undefined),
+          providerUsed: data.providerUsed,
+        };
+
+        accumulatedMessages = [...accumulatedMessages, fragmentItem];
+        updateAndNotifyMessages(accumulatedMessages);
+
+        if (data.isComplete) {
+          break;
+        }
+
+        // Immediately set typing indicator for the NEXT speaker before starting generation
+        if (stepIdx < fragmentPlan.length - 1) {
+          const nextStep = fragmentPlan[stepIdx + 1];
+          setActiveTypingSpeaker(nextStep.speaker);
+        }
       }
 
-      // Model returned valid replies (1 or 2 messages)
-      const companionReplies: CompanionReplyMessage[] = data.replies || [];
-      const replyItems: ChatMessageItem[] = companionReplies.map((r, idx) => ({
-        id: `reply-${Date.now()}-${idx}`,
-        sender: r.speaker,
-        text: r.text,
-        evidenceReference: r.evidenceReference,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        timing: idx === companionReplies.length - 1 ? data.timing : undefined,
-        workflowDiagram: r.workflowDiagram || (idx === 0 ? data.workflowDiagram : undefined),
-        providerUsed: data.providerUsed,
-      }));
-
-      const updatedMessages = [...newMessages, ...replyItems];
-      updateAndNotifyMessages(updatedMessages);
       setFailedMessage(null);
       setErrorInfo(null);
     } catch (err: unknown) {
       if (prevProjectKeyRef.current !== requestProjectKey) {
         return;
       }
+      setActiveTypingSpeaker(null);
       const msg = err instanceof Error ? err.message : 'Network failure';
       setErrorMessage(`Request failed: ${msg}. You can retry.`);
       setErrorInfo({
@@ -371,6 +521,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       });
       setFailedMessage(trimmed);
     } finally {
+      setActiveTypingSpeaker(null);
       setIsLoading(false);
       isSendingRef.current = false;
     }
@@ -383,7 +534,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
+  const handleStopGenerating = () => {
+    revealCancelledRef.current = true;
+    setActiveTypingSpeaker(null);
+    setIsLoading(false);
+    isSendingRef.current = false;
+    if (isListening && recognitionRef.current) {
+      try {
+        (recognitionRef.current as { stop: () => void }).stop();
+      } catch {
+        // ignore
+      }
+      setIsListening(false);
+    }
+  };
+
   const handleClearChat = () => {
+    revealCancelledRef.current = true;
+    setActiveTypingSpeaker(null);
+    setIsLoading(false);
+    isSendingRef.current = false;
+    if (isListening && recognitionRef.current) {
+      try {
+        (recognitionRef.current as { stop: () => void }).stop();
+      } catch {
+        // ignore
+      }
+      setIsListening(false);
+    }
     setMessages([
       {
         id: 'reset-dog',
@@ -472,7 +650,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       )}
 
       {/* Group Chat Messages Scrollable Stream */}
-      <div className="chat-messages-scroll" role="log" aria-live="polite">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="chat-messages-scroll"
+        role="log"
+        aria-live="polite"
+      >
         {messages.map((msg) => {
           if (msg.sender === 'user') {
             return (
@@ -503,7 +687,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   <span className="companion-time-label">{msg.timestamp}</span>
                 </div>
                 <p className="message-body">{msg.text}</p>
-                {msg.evidenceReference && (
+                {msg.sender === 'cat' && msg.evidenceReference && (
                   <div className="evidence-ref-tag">
                     Ref: <code>{msg.evidenceReference}</code>
                   </div>
@@ -516,35 +700,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     onSelectRoom={onSelectRoom}
                   />
                 )}
-                {msg.timing && (
-                  <div
-                    className="companion-timing-badge"
-                    title={`End-to-end: ${msg.timing.totalMs}ms | Provider: ${msg.timing.provider || msg.timing.providerUsed || 'gemini'} (${msg.timing.upstreamMs}ms) | Context: ${msg.timing.contextPrepMs}ms | Tokens: ${msg.timing.totalTokens ?? 'n/a'}`}
-                  >
-                    {(msg.timing.fallbackUsed || msg.timing.provider === 'groq' || msg.timing.providerUsed === 'groq') && (
-                      <span className="backup-ai-indicator" title="Generated by Groq backup AI">🛡️ Using backup AI · </span>
-                    )}
-                    ⚡ {msg.timing.totalMs}ms (model: {msg.timing.upstreamMs}ms)
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
 
-        {/* Genuine Typing Indicator while waiting for model */}
-        {isLoading && (
-          <div className="typing-indicator-row">
-            <div className="typing-avatars">
-              <PixelPetAvatar speaker="dog" size={22} isTyping />
-              <PixelPetAvatar speaker="cat" size={22} isTyping />
+        {/* Genuine Character-Specific Typing Indicator */}
+        {activeTypingSpeaker && (
+          <div
+            className={`companion-group-row typing-fragment-row ${
+              activeTypingSpeaker === 'dog' ? 'companion-dog-row' : 'companion-cat-row'
+            }`}
+            role="status"
+            aria-label={`${activeTypingSpeaker === 'dog' ? 'Barkley' : 'Cleo'} is thinking`}
+          >
+            <div className="companion-avatar-col">
+              <PixelPetAvatar speaker={activeTypingSpeaker} size={30} isTyping />
             </div>
-            <div className="typing-bubble">
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
+            <div className="companion-bubble-col typing-bubble-col">
+              <div className="companion-bubble-header">
+                <span className="companion-name-label">
+                  {activeTypingSpeaker === 'dog' ? 'Barkley (Dog)' : 'Cleo (Cat)'}
+                </span>
+                <span className="typing-status-hint">
+                  {activeTypingSpeaker === 'dog' ? 'Barkley is explaining...' : 'Cleo is verifying code...'}
+                </span>
+              </div>
+              <div className="character-typing-dots">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </div>
             </div>
-            <span className="typing-status-hint">Consulting Barkley & Cleo (waiting for Gemini)...</span>
           </div>
         )}
 
@@ -594,8 +781,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
         <textarea
           ref={textareaRef}
-          className="chat-input-box active-chat"
-          placeholder="Ask Barkley & Cleo about this codebase... (Enter to send, Shift+Enter for newline)"
+          className={`chat-input-box active-chat ${isListening ? 'listening-active' : ''}`}
+          placeholder={
+            isListening
+              ? "🎙️ Listening... speak clearly into your microphone..."
+              : "Ask Barkley & Cleo about this codebase... (Enter to send, Shift+Enter for newline)"
+          }
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -605,26 +796,60 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         />
 
         <div className="chat-input-actions">
-          <button
-            type="button"
-            className="btn-clear-chat"
-            onClick={handleClearChat}
-            disabled={isLoading || messages.length <= 1}
-            title="Clear conversation history"
-          >
-            Clear chat
-          </button>
+          <div className="chat-input-left-buttons">
+            <button
+              type="button"
+              className="btn-clear-chat"
+              onClick={handleClearChat}
+              disabled={isLoading || messages.length <= 1}
+              title="Clear conversation history"
+            >
+              Clear chat
+            </button>
+
+            <button
+              type="button"
+              className={`btn-voice-input ${isListening ? 'listening' : ''}`}
+              onClick={handleToggleVoiceInput}
+              disabled={isLoading}
+              title={isListening ? 'Stop listening' : 'Voice input (Speak to Barkley & Cleo)'}
+              aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+            >
+              {isListening ? (
+                <>
+                  <span className="voice-wave-dot" />
+                  <span>Listening...</span>
+                </>
+              ) : (
+                <>
+                  <span className="voice-mic-icon">🎙️</span>
+                  <span>Voice</span>
+                </>
+              )}
+            </button>
+          </div>
 
           <span className="chat-input-hint">Enter to send · Shift+Enter newline</span>
 
-          <button
-            type="button"
-            className="btn-send-active"
-            onClick={() => handleSendMessage(inputVal)}
-            disabled={isLoading || !inputVal.trim()}
-          >
-            {isLoading ? 'Thinking...' : 'Send'}
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              className="btn-send-active btn-stop-generating"
+              onClick={handleStopGenerating}
+              title="Stop generating response"
+            >
+              ⏹ Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-send-active"
+              onClick={() => handleSendMessage(inputVal)}
+              disabled={!inputVal.trim()}
+            >
+              Send
+            </button>
+          )}
         </div>
       </div>
 

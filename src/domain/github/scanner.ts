@@ -21,6 +21,7 @@ import { validateGitHubUrl } from './url.ts';
 import { fetchCommitCheckRuns, evaluateCheckRunsForVerification } from '../lifecycle/ciEvaluator.ts';
 import type { GitHubCheckRun } from '../lifecycle/types.ts';
 import { buildCodeIndex } from '../codeIndex/index.ts';
+import { buildRepositoryKnowledgeBase } from '../repositoryKnowledge/index.ts';
 
 export { clearScannerCache, getScannerCacheStats, redactSecrets };
 

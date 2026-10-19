@@ -127,6 +127,7 @@ export interface GitHubScanResult {
   checkRuns?: GitHubCheckRun[];
   ciEvaluation?: EvaluateCiOutcomeResult;
   codeIndex?: CodeIndex;
+  repositoryKnowledge?: import('../repositoryKnowledge/types.ts').RepositoryKnowledgeBase;
   rateLimit?: RateLimitInfo;
   warnings: string[];
   error?: string;

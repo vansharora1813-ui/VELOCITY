@@ -103,6 +103,11 @@ export interface ChatApiRequest {
       failedChecks: string[];
     };
   };
+  isFragmentRequest?: boolean;
+  fragmentIndex?: number;
+  targetSpeaker?: CompanionSpeaker;
+  conversationStage?: string;
+  previousFragments?: CompanionReplyMessage[];
 }
 
 export interface ExecutionTimingMetadata {
@@ -144,6 +149,9 @@ export interface AiErrorInfo {
 export interface ChatApiResponse {
   success: boolean;
   replies?: CompanionReplyMessage[];
+  reply?: CompanionReplyMessage;
+  isComplete?: boolean;
+  nextSpeaker?: CompanionSpeaker | null;
   workflowDiagram?: WorkflowDiagram;
   error?: string;
   code?: 'CONFIG_REQUIRED' | 'RATE_LIMITED' | 'PROVIDER_ERROR' | 'INVALID_REQUEST';
