@@ -16,6 +16,9 @@ function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
   const limitHeader = headers.get('x-ratelimit-limit');
   const remainingHeader = headers.get('x-ratelimit-remaining');
   const resetHeader = headers.get('x-ratelimit-reset');
+  const retryAfterHeader = headers.get('retry-after');
+
+  const retryAfterSeconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
 
   if (limitHeader && remainingHeader && resetHeader) {
     const resetSeconds = parseInt(resetHeader, 10);
@@ -23,6 +26,16 @@ function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
       limit: parseInt(limitHeader, 10),
       remaining: parseInt(remainingHeader, 10),
       resetDate: new Date(resetSeconds * 1000).toISOString(),
+      retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
+    };
+  }
+
+  if (retryAfterSeconds && Number.isFinite(retryAfterSeconds)) {
+    return {
+      limit: 60,
+      remaining: 0,
+      resetDate: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+      retryAfterSeconds,
     };
   }
   return undefined;
@@ -99,7 +112,12 @@ export async function scanGitHubRepository(
     }
 
     if (metaRes.status === 403) {
-      const resetMsg = rateLimit ? ` Quota resets at ${new Date(rateLimit.resetDate).toLocaleTimeString()}.` : '';
+      let resetMsg = '';
+      if (rateLimit) {
+        const resetDate = new Date(rateLimit.resetDate);
+        const minsLeft = Math.max(1, Math.round((resetDate.getTime() - Date.now()) / 60000));
+        resetMsg = ` Quota resets at ${resetDate.toLocaleTimeString()} (in ~${minsLeft} min${minsLeft === 1 ? '' : 's'}).`;
+      }
       return {
         success: false,
         status: 'failed',
@@ -392,10 +410,13 @@ export async function scanGitHubRepository(
             // Ignore parse errors on malformed manifests
           }
         }
+      } else {
+        skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
+        warnings.push(`File "${candidate.path}" could not be inspected (HTTP ${fileRes.status}).`);
       }
     } catch {
-      // If fetching an individual raw file fails, skip gracefully
-      skipped.push({ path: candidate.path, reason: 'scan_file_budget_exceeded' });
+      skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
+      warnings.push(`File "${candidate.path}" could not be inspected due to network error.`);
     }
   }
 

@@ -221,6 +221,13 @@ export async function executeRoomInvestigation(
       } catch {
         // fallback
       }
+      if (res.status === 400 || res.status === 413) {
+        return {
+          success: false,
+          code: 'INVALID_REQUEST',
+          error: `Investigation request was rejected by provider (HTTP ${res.status}): ${detail}`,
+        };
+      }
       return {
         success: false,
         code: 'PROVIDER_ERROR',

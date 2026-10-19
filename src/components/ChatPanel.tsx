@@ -103,23 +103,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  const handleSendMessage = async (textToSend: string) => {
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
+
+  const handleSendMessage = async (textToSend: string, isRetry = false) => {
     const trimmed = textToSend.trim();
     if (!trimmed || isLoading) return;
 
-    const userMessageId = `user-${Date.now()}`;
-    const userMessageItem: ChatMessageItem = {
-      id: userMessageId,
-      sender: 'user',
-      text: trimmed,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
+    let newMessages = messages;
+    let currentMessageId = '';
 
-    const newMessages = [...messages, userMessageItem];
-    updateAndNotifyMessages(newMessages);
-    setInputVal('');
+    if (!isRetry) {
+      currentMessageId = `user-${Date.now()}`;
+      const userMessageItem: ChatMessageItem = {
+        id: currentMessageId,
+        sender: 'user',
+        text: trimmed,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      newMessages = [...messages, userMessageItem];
+      updateAndNotifyMessages(newMessages);
+      setInputVal('');
+    } else {
+      currentMessageId = messages[messages.length - 1]?.id || '';
+    }
+
     setIsLoading(true);
     setErrorMessage(null);
+    const requestProjectKey = currentProjectKey;
 
     // Build context payload from current scan / sample state
     const repoContext = !isSampleActive && scanResult
@@ -205,7 +216,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     // Format bounded history
     const historyPayload = newMessages
       .slice(-6)
-      .filter((m) => m.id !== userMessageId)
+      .filter((m) => m.id !== currentMessageId)
       .map((m) => ({
         role: m.sender === 'user' ? ('user' as const) : ('assistant' as const),
         text: m.text,
@@ -226,11 +237,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       const data = await response.json();
 
+      if (prevProjectKeyRef.current !== requestProjectKey) {
+        // Discard late response if user switched repository during in-flight request
+        return;
+      }
+
       if (!response.ok || !data.success) {
         if (data.code === 'CONFIG_REQUIRED') {
           setSetupRequired(true);
         } else {
           setErrorMessage(data.error || 'Failed to communicate with AI provider.');
+          setFailedMessage(trimmed);
         }
         return;
       }
@@ -245,11 +262,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }));
 
-      const updatedMessages = [...messages, ...replyItems];
+      const updatedMessages = [...newMessages, ...replyItems];
       updateAndNotifyMessages(updatedMessages);
+      setFailedMessage(null);
     } catch (err: unknown) {
+      if (prevProjectKeyRef.current !== requestProjectKey) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : 'Network failure';
-      setErrorMessage(`Request failed: ${msg}`);
+      setErrorMessage(`Request failed: ${msg}. You can retry.`);
+      setFailedMessage(trimmed);
     } finally {
       setIsLoading(false);
     }
@@ -385,11 +407,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       {/* Error Banner */}
       {errorMessage && (
         <div className="chat-error-toast" role="alert">
-          <span>⚠️ {errorMessage}</span>
+          <span className="chat-error-text">⚠️ {errorMessage}</span>
+          {failedMessage && !setupRequired && (
+            <button
+              type="button"
+              className="btn-retry-chat"
+              onClick={() => handleSendMessage(failedMessage, true)}
+              disabled={isLoading}
+              title="Retry sending this message"
+            >
+              Retry
+            </button>
+          )}
           <button
             type="button"
             className="error-dismiss-btn"
-            onClick={() => setErrorMessage(null)}
+            onClick={() => {
+              setErrorMessage(null);
+              setFailedMessage(null);
+            }}
           >
             ✕
           </button>

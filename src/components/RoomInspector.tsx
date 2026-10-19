@@ -36,8 +36,17 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
   const [showPrompt, setShowPrompt] = useState(Boolean(savedFinding?.generatedPrompt));
   const [copySuccess, setCopySuccess] = useState(false);
 
+  const activeTargetRef = React.useRef<{ roomId: string; commitSha?: string }>({
+    roomId: room?.id || '',
+    commitSha: scanResult?.commitSha,
+  });
+
   // Restore or clear investigation and prompt state when switching rooms, repository, or scanned commit
   useEffect(() => {
+    activeTargetRef.current = {
+      roomId: room?.id || '',
+      commitSha: scanResult?.commitSha,
+    };
     setFinding(savedFinding || null);
     setErrorMessage(null);
     setSetupRequired(false);
@@ -120,6 +129,9 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
           detectedTechnologies: ['TypeScript', 'React', 'PostgreSQL', 'Docker'],
         };
 
+    const targetRoomId = room.id;
+    const targetCommitSha = scanResult?.commitSha;
+
     try {
       const response = await fetch('/api/investigate', {
         method: 'POST',
@@ -137,6 +149,14 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
 
       const data = await response.json();
 
+      // Discard late response if user switched room or commit while request was in-flight
+      if (
+        activeTargetRef.current.roomId !== targetRoomId ||
+        activeTargetRef.current.commitSha !== targetCommitSha
+      ) {
+        return;
+      }
+
       if (!response.ok || !data.success) {
         if (data.code === 'CONFIG_REQUIRED') {
           setSetupRequired(true);
@@ -152,8 +172,14 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
         onFindingChange(room.id, newFinding);
       }
     } catch (err: unknown) {
+      if (
+        activeTargetRef.current.roomId !== targetRoomId ||
+        activeTargetRef.current.commitSha !== targetCommitSha
+      ) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : 'Network failure';
-      setErrorMessage(`Investigation request failed: ${msg}`);
+      setErrorMessage(`Investigation request failed: ${msg}. You can retry.`);
     } finally {
       setIsInvestigating(false);
     }
@@ -375,6 +401,22 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Evidence Limitation / Downgrade Honest Notice */}
+          {finding.evidenceClassification !== 'observed' && (
+            <div className="finding-uncertainty-banner" role="status">
+              ℹ️ <strong>Result Classification: {finding.evidenceClassification.toUpperCase()}</strong>.
+              {finding.evidenceClassification === 'inferred'
+                ? ' This diagnosis is derived by architectural inference because exact verified source files or failing CI logs were not directly observed.'
+                : ' Grounding is limited by missing or uninspected files. Review actual source before acting.'}
+            </div>
+          )}
+
+          {finding.rejectedReferences && finding.rejectedReferences.length > 0 && (
+            <div className="finding-uncertainty-banner" role="status">
+              ⚠️ <strong>Ungrounded Files Excluded:</strong> {finding.rejectedReferences.join(', ')} do not exist in the repository tree and were stripped from evidence.
+            </div>
+          )}
 
           <p className="finding-explanation">{finding.explanation}</p>
 

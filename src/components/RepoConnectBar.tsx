@@ -32,6 +32,7 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [stageMessage, setStageMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [retryUrl, setRetryUrl] = useState<{ url: string; isRefresh: boolean } | null>(null);
 
   const performScan = async (repoUrl: string, isRefresh = false) => {
     setErrorMessage(null);
@@ -48,20 +49,39 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
       );
 
       if (!result.success) {
+        const errorText = result.error || (isRefresh ? 'Unable to fetch newer commit' : 'Repository scan failed.');
+        const isRateLimit = errorText.toLowerCase().includes('rate limit');
+
         if (isRefresh) {
-          setErrorMessage(`Refresh failed: ${result.error || 'Unable to fetch newer commit'}. Preserving saved scan.`);
+          setErrorMessage(`Refresh failed: ${errorText}. Preserving saved scan.`);
         } else {
-          setErrorMessage(result.error || 'Repository scan failed.');
+          setErrorMessage(errorText);
+        }
+
+        // Only allow immediate retry if not rate-limited
+        if (!isRateLimit) {
+          setRetryUrl({ url: repoUrl, isRefresh });
+        } else {
+          setRetryUrl(null);
         }
       } else {
+        setRetryUrl(null);
         onScanComplete(result);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Unknown error during scan';
+      const isRateLimit = msg.toLowerCase().includes('rate limit');
+
       if (isRefresh) {
         setErrorMessage(`Refresh failed: ${msg}. Preserving saved scan.`);
       } else {
         setErrorMessage(msg);
+      }
+
+      if (!isRateLimit) {
+        setRetryUrl({ url: repoUrl, isRefresh });
+      } else {
+        setRetryUrl(null);
       }
     } finally {
       setIsScanning(false);
@@ -209,6 +229,11 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
               💾 Saved scan (@{lastScanResult.commitSha ? lastScanResult.commitSha.slice(0, 7) : 'unknown'} · {formatScannedTime(lastScanResult.scannedAt)}) · Unverified against latest remote until refreshed
             </span>
           )}
+          {!isSampleActive && lastScanResult && lastScanResult.status === 'partial' && (
+            <span className="partial-scan-badge" role="status" title="Scan bounded to partial files. Open telemetry for details.">
+              ⚡ Partial scan ({lastScanResult.inspectedFiles.length} inspected, {lastScanResult.skippedFiles.length} skipped)
+            </span>
+          )}
         </div>
         {isScanning && <span className="scan-progress-indicator">⚡ {stageMessage}</span>}
       </div>
@@ -218,10 +243,24 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
         <div className="repo-error-banner" role="alert">
           <span className="error-icon">⚠️</span>
           <span>{errorMessage}</span>
+          {retryUrl && (
+            <button
+              type="button"
+              className="btn-retry-scan"
+              onClick={() => performScan(retryUrl.url, retryUrl.isRefresh)}
+              disabled={isScanning}
+              title="Retry repository request"
+            >
+              Retry
+            </button>
+          )}
           <button
             type="button"
             className="error-dismiss-btn"
-            onClick={() => setErrorMessage(null)}
+            onClick={() => {
+              setErrorMessage(null);
+              setRetryUrl(null);
+            }}
           >
             ✕
           </button>

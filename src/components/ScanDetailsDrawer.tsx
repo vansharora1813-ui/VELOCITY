@@ -63,6 +63,15 @@ export const ScanDetailsDrawer: React.FC<ScanDetailsDrawerProps> = ({
           </div>
         )}
 
+        {/* Partial Scan Honest Limitation Notice */}
+        {scanResult.status === 'partial' && (
+          <div className="scan-partial-box" role="status">
+            <strong>⚠️ Partial Scan Coverage:</strong> {scanResult.inspectedFiles.length} file contents
+            inspected; {scanResult.skippedFiles.length} files were skipped or could not be read.
+            Architectural conclusions in rooms lacking inspected source files remain unverified.
+          </div>
+        )}
+
         {/* Metrics Grid */}
         <div className="scan-metrics-grid">
           <div className="scan-metric-card">
@@ -74,12 +83,16 @@ export const ScanDetailsDrawer: React.FC<ScanDetailsDrawerProps> = ({
             <span className="metric-lbl">Files Inspected</span>
           </div>
           <div className="scan-metric-card">
-            <span className="metric-val">{scanResult.skippedFiles.length}</span>
-            <span className="metric-lbl">Files Excluded / Skipped</span>
+            <span className="metric-val">
+              {scanResult.skippedFiles.filter((f) => f.reason !== 'content_fetch_failed').length}
+            </span>
+            <span className="metric-lbl">Files Budget-Skipped</span>
           </div>
           <div className="scan-metric-card">
-            <span className="metric-val">{scanResult.detectedTechnologies.length}</span>
-            <span className="metric-lbl">Tech Stacks Detected</span>
+            <span className="metric-val">
+              {scanResult.skippedFiles.filter((f) => f.reason === 'content_fetch_failed').length}
+            </span>
+            <span className="metric-lbl">Content Fetch Failed</span>
           </div>
         </div>
 
@@ -179,6 +192,27 @@ export const ScanDetailsDrawer: React.FC<ScanDetailsDrawerProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Skipped / Failed Files List */}
+        {scanResult.skippedFiles.length > 0 && (
+          <div className="scan-files-section" style={{ marginTop: 20 }}>
+            <div className="section-label">
+              EXCLUDED & SKIPPED FILES ({scanResult.skippedFiles.length}):
+            </div>
+            <div className="inspected-files-list">
+              {scanResult.skippedFiles.map((skipped, idx) => (
+                <div key={idx} className="inspected-file-item skipped-item">
+                  <div className="file-item-header">
+                    <span className="file-path">{skipped.path}</span>
+                    <span className={`skipped-reason-tag ${skipped.reason}`}>
+                      {skipped.reason.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

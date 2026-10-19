@@ -20,6 +20,7 @@ export interface RateLimitInfo {
   limit: number;
   remaining: number;
   resetDate: string;
+  retryAfterSeconds?: number;
 }
 
 export interface GitHubRepoMetadata {
@@ -68,7 +69,8 @@ export interface SkippedFile {
     | 'binary_asset'
     | 'lockfile'
     | 'exceeds_file_size_limit'
-    | 'scan_file_budget_exceeded';
+    | 'scan_file_budget_exceeded'
+    | 'content_fetch_failed';
 }
 
 export interface GitHubScanOptions {

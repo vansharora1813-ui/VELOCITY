@@ -184,6 +184,14 @@ export async function executeAiChat(
         // use statusText fallback
       }
 
+      if (res.status === 400 || res.status === 413) {
+        return {
+          success: false,
+          code: 'INVALID_REQUEST',
+          error: `AI provider rejected request (HTTP ${res.status}): ${detailMsg}`,
+        };
+      }
+
       if (res.status === 404) {
         return {
           success: false,
@@ -219,7 +227,7 @@ export async function executeAiChat(
       };
     } catch (parseErr: unknown) {
       const msg = parseErr instanceof Error ? parseErr.message : 'Invalid response format';
-      // Graceful fallback for non-fatal JSON parsing errors
+      // Graceful fallback for plain-text model responses without inventing dialogue
       return {
         success: true,
         replies: [

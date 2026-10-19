@@ -1154,6 +1154,95 @@ html, body, #root {
   border: none;
   color: #F2A8A8;
   cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.error-dismiss-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-retry-scan {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: #4E2727;
+  border: 1px solid #9C4B4B;
+  border-radius: 3px;
+  color: #FFD2D2;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-retry-scan:hover:not(:disabled) {
+  background: #633232;
+  border-color: #B85959;
+}
+
+.partial-scan-badge {
+  color: #E6C875;
+  background: rgba(230, 200, 117, 0.12);
+  border: 1px solid rgba(230, 200, 117, 0.35);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+}
+
+.btn-retry-chat {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: #4E2727;
+  border: 1px solid #9C4B4B;
+  border-radius: 3px;
+  color: #FFD2D2;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.btn-retry-chat:hover:not(:disabled) {
+  background: #633232;
+}
+
+.scan-partial-box {
+  padding: 10px 14px;
+  background: rgba(230, 200, 117, 0.08);
+  border: 1px solid rgba(230, 200, 117, 0.35);
+  border-radius: 4px;
+  color: #E6C875;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.skipped-item {
+  opacity: 0.75;
+}
+
+.skipped-reason-tag {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #3B302F;
+  color: #C2A8A4;
+  border: 1px solid #524240;
+  text-transform: capitalize;
+}
+
+.skipped-reason-tag.content_fetch_failed {
+  background: #442424;
+  color: #FFB3B3;
+  border-color: #7A3B3B;
+}
+
+.finding-uncertainty-banner {
+  margin: 6px 0 10px 0;
+  padding: 8px 10px;
+  background: rgba(135, 178, 230, 0.08);
+  border: 1px solid rgba(135, 178, 230, 0.3);
+  border-radius: 4px;
+  color: #BFD8F7;
+  font-size: 0.74rem;
+  line-height: 1.4;
 }
 
 /* Scan Details Drawer / Modal */
