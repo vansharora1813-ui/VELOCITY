@@ -6,16 +6,19 @@ import type {
 } from '../domain/investigation/types.ts';
 import { prepareSourceContext } from './contextBuilder.ts';
 
+
 export function buildInvestigationSystemPrompt(request: InvestigateApiRequest): string {
   const { roomId, roomName, roomLayer, roomStatus, roomEvidence, roomFilePaths, repoContext } = request;
 
+  // Use focused budget for investigation prioritizing selected room files and related tests
   const sourceContext = prepareSourceContext({
     inspectedFiles: repoContext.inspectedFiles || [],
     discoveredFilePaths: repoContext.discoveredFilePaths || [],
     selectedRoomId: roomId,
     selectedRoomFilePaths: roomFilePaths,
-    totalBudgetChars: 16000,
-    maxPerFileChars: 3000,
+    totalBudgetChars: 12000,
+    maxPerFileChars: 2500,
+    commitSha: repoContext.commitSha,
   });
 
   const commitInfo = repoContext.commitSha
@@ -29,9 +32,9 @@ export function buildInvestigationSystemPrompt(request: InvestigateApiRequest): 
   return `You are Barkley (Dog) and Cleo (Cat), the architectural investigation team for The Living Blueprint.
 You are investigating a specific architectural room in a scanned GitHub repository:
 
-TARGET ROOM: "${roomName}" (id: ${roomId}, layer: ${roomLayer})
-CURRENT EVIDENCE STATUS: ${roomStatus.toUpperCase()}
-CURRENT EVIDENCE LOG: ${roomEvidence}
+TARGET ROOM: "${roomName || roomId}" (id: ${roomId}, layer: ${roomLayer || 'domain'})
+CURRENT EVIDENCE STATUS: ${(roomStatus || 'unknown').toUpperCase()}
+CURRENT EVIDENCE LOG: ${roomEvidence || 'None'}
 
 REPOSITORY: ${repoContext.owner}/${repoContext.repo} (branch: ${repoContext.branch})
 ${commitInfo}
@@ -79,217 +82,159 @@ OUTPUT FORMAT (JSON Object):
 `;
 }
 
+import { executeAiWithFallback } from './aiProviderRunner.ts';
+
 export async function executeRoomInvestigation(
   request: InvestigateApiRequest,
   env: Record<string, string | undefined> = process.env,
   fetchFn: typeof fetch = fetch
 ): Promise<InvestigateApiResponse> {
-  const apiKey = env.GEMINI_API_KEY || env.GOOGLE_GENAI_API_KEY || env.AI_API_KEY;
-  const rawModel = (env.AI_MODEL || 'gemini-3.8-flash').trim();
-
-  if (!rawModel || !/^[a-zA-Z0-9_.-]+$/.test(rawModel)) {
-    return {
-      success: false,
-      code: 'CONFIG_REQUIRED',
-      error: `Invalid AI_MODEL configuration: "${rawModel}".`,
-    };
-  }
-  const model = rawModel;
-
-  if (!apiKey || apiKey.trim().length === 0) {
-    return {
-      success: false,
-      code: 'CONFIG_REQUIRED',
-      error: 'AI provider is not configured. Add GEMINI_API_KEY to your environment variables or .env file to enable room investigation.',
-    };
-  }
-
+  const startTime = Date.now();
+  const contextPrepStart = Date.now();
   const systemPrompt = buildInvestigationSystemPrompt(request);
+  const contextPrepMs = Date.now() - contextPrepStart;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const payload = {
-    systemInstruction: {
-      parts: [{ text: systemPrompt }],
-    },
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          {
-            text: `Investigate room "${request.roomName}" (${request.roomId}) based on the scanned evidence and return structured diagnostic findings.`,
-          },
+  const investigationSchema = {
+    type: 'OBJECT',
+    properties: {
+      title: { type: 'STRING' },
+      explanation: { type: 'STRING' },
+      category: {
+        type: 'STRING',
+        enum: [
+          'missing_proof',
+          'possible_bug',
+          'security_risk',
+          'configuration_risk',
+          'test_gap',
+          'dependency_risk',
+          'unknown',
         ],
       },
-    ],
-    generationConfig: {
-      temperature: 0.4,
-      maxOutputTokens: 4096,
-      responseMimeType: 'application/json',
-      responseSchema: {
+      severity: { type: 'STRING', enum: ['info', 'low', 'medium', 'high'] },
+      evidenceClassification: {
+        type: 'STRING',
+        enum: ['observed', 'inferred', 'unverified'],
+      },
+      evidencePaths: {
+        type: 'ARRAY',
+        items: { type: 'STRING' },
+      },
+      codeEvidence: {
         type: 'OBJECT',
         properties: {
-          title: { type: 'STRING' },
+          filePath: { type: 'STRING' },
+          targetIdentifier: { type: 'STRING' },
+          codeSnippet: { type: 'STRING' },
           explanation: { type: 'STRING' },
-          category: {
-            type: 'STRING',
-            enum: [
-              'missing_proof',
-              'possible_bug',
-              'security_risk',
-              'configuration_risk',
-              'test_gap',
-              'dependency_risk',
-              'unknown',
-            ],
-          },
-          severity: { type: 'STRING', enum: ['info', 'low', 'medium', 'high'] },
-          evidenceClassification: {
-            type: 'STRING',
-            enum: ['observed', 'inferred', 'unverified'],
-          },
-          evidencePaths: {
-            type: 'ARRAY',
-            items: { type: 'STRING' },
-          },
-          codeEvidence: {
-            type: 'OBJECT',
-            properties: {
-              filePath: { type: 'STRING' },
-              targetIdentifier: { type: 'STRING' },
-              codeSnippet: { type: 'STRING' },
-              explanation: { type: 'STRING' },
-            },
-          },
-          recommendedNextStep: { type: 'STRING' },
-          uncertainties: { type: 'STRING' },
-          companionMessages: {
-            type: 'ARRAY',
-            items: {
-              type: 'OBJECT',
-              properties: {
-                speaker: { type: 'STRING', enum: ['dog', 'cat'] },
-                text: { type: 'STRING' },
-                evidenceReference: { type: 'STRING' },
-              },
-              required: ['speaker', 'text'],
-            },
-          },
         },
-        required: [
-          'title',
-          'explanation',
-          'category',
-          'severity',
-          'evidenceClassification',
-          'evidencePaths',
-          'recommendedNextStep',
-          'uncertainties',
-        ],
+      },
+      recommendedNextStep: { type: 'STRING' },
+      uncertainties: { type: 'STRING' },
+      companionMessages: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            speaker: { type: 'STRING', enum: ['dog', 'cat'] },
+            text: { type: 'STRING' },
+            evidenceReference: { type: 'STRING' },
+          },
+          required: ['speaker', 'text'],
+        },
       },
     },
+    required: [
+      'title',
+      'explanation',
+      'category',
+      'severity',
+      'evidenceClassification',
+      'evidencePaths',
+      'recommendedNextStep',
+      'uncertainties',
+    ],
   };
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout (within 30s function budget)
+  const outcome = await executeAiWithFallback(
+    {
+      systemInstruction: systemPrompt,
+      messages: [
+        {
+          role: 'user',
+          text: `Investigate room "${request.roomName}" (${request.roomId}) based on the scanned evidence and return structured diagnostic findings.`,
+        },
+      ],
+      temperature: 0.4,
+      responseSchema: investigationSchema,
+      feature: 'investigation',
+      overallTimeoutMs: 25000,
+      perProviderTimeoutMs: 12000,
+    },
+    env,
+    fetchFn
+  );
 
-  try {
-    const res = await fetchFn(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (res.status === 429) {
-      return {
-        success: false,
-        code: 'RATE_LIMITED',
-        error: 'AI provider rate limit reached. Please wait a moment before investigating.',
-      };
-    }
-
-    if (!res.ok) {
-      let detail = res.statusText || `HTTP ${res.status}`;
-      try {
-        const errorJson = await res.json();
-        if (errorJson?.error?.message) {
-          detail = errorJson.error.message.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
-        }
-      } catch {
-        // fallback
-      }
-      if (res.status === 400 || res.status === 413) {
-        return {
-          success: false,
-          code: 'INVALID_REQUEST',
-          error: `Investigation request was rejected by provider (HTTP ${res.status}): ${detail}`,
-        };
-      }
-      return {
-        success: false,
-        code: 'PROVIDER_ERROR',
-        error: `AI provider error (HTTP ${res.status}): ${detail}`,
-      };
-    }
-
-    const data = await res.json();
-    const candidate = data.candidates?.[0];
-    const textPart = candidate?.content?.parts?.[0]?.text;
-
-    if (!textPart) {
-      return {
-        success: false,
-        code: 'PROVIDER_ERROR',
-        error: 'AI model returned an empty investigation response.',
-      };
-    }
-
-    let rawParsed: Record<string, unknown> = {};
-    try {
-      let cleaned = textPart.trim();
-      if (cleaned.startsWith('```')) {
-        cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      }
-      rawParsed = JSON.parse(cleaned);
-    } catch {
-      return {
-        success: false,
-        code: 'PROVIDER_ERROR',
-        error: 'Failed to parse structured JSON from investigation model.',
-      };
-    }
-
-    // Validate and ground the finding against real repository files
-    const finding = validateInvestigationFinding(rawParsed, request);
-
-    // Attach deterministic, self-contained coding-agent prompt
-    finding.generatedPrompt = generateRepairPrompt(finding, request.repoContext);
-
+  if (!outcome.success) {
     return {
-      success: true,
-      finding,
+      success: false,
+      code: outcome.code,
+      error: outcome.error,
+      errorInfo: outcome.errorInfo,
     };
-  } catch (err: unknown) {
-    clearTimeout(timeoutId);
-    if (err instanceof Error && err.name === 'AbortError') {
-      return {
-        success: false,
-        code: 'PROVIDER_ERROR',
-        error: 'Investigation request timed out (25s limit). Please try again.',
-      };
+  }
+
+  const validationStart = Date.now();
+  let rawParsed: Record<string, unknown> = {};
+  try {
+    let cleaned = outcome.rawText.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     }
-    let msg = err instanceof Error ? err.message : 'Network failure';
-    if (apiKey) {
-      msg = msg.split(apiKey).join('[REDACTED]');
-    }
-    msg = msg.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
+    rawParsed = JSON.parse(cleaned);
+  } catch {
     return {
       success: false,
       code: 'PROVIDER_ERROR',
-      error: `Failed to communicate with AI provider: ${msg}`,
+      error: 'Failed to parse structured JSON from investigation model.',
     };
   }
+
+  // Validate and ground the finding against real repository files
+  const finding = validateInvestigationFinding(rawParsed, request);
+
+  // Attach deterministic, self-contained coding-agent prompt
+  finding.generatedPrompt = generateRepairPrompt(finding, request.repoContext);
+  finding.providerUsed = outcome.providerUsed;
+  finding.provider = outcome.providerUsed;
+  finding.fallbackUsed = outcome.providerUsed === 'groq';
+
+  const validationMs = Date.now() - validationStart;
+  const totalMs = Date.now() - startTime;
+
+  const timing = {
+    contextPrepMs,
+    upstreamMs: outcome.upstreamMs,
+    validationMs,
+    totalMs,
+    promptTokens: outcome.promptTokens,
+    candidatesTokens: outcome.candidatesTokens,
+    totalTokens: outcome.totalTokens,
+    thinkingLevel: outcome.thinkingLevel,
+    finishReason: outcome.finishReason,
+    providerUsed: outcome.providerUsed,
+    provider: outcome.providerUsed,
+    fallbackUsed: outcome.providerUsed === 'groq',
+  };
+
+  finding.timing = timing;
+
+  return {
+    success: true,
+    finding,
+    providerUsed: outcome.providerUsed,
+    provider: outcome.providerUsed,
+    fallbackUsed: outcome.providerUsed === 'groq',
+    timing,
+  };
 }

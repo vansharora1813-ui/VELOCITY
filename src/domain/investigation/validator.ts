@@ -161,6 +161,13 @@ export function validateInvestigationFinding(
       const inspected = inspectedFileMap.get(rawFilePath.toLowerCase());
       if (!inspected || !inspected.contentExcerpt) {
         rejectedCodeItems.push(`codeEvidence file "${rawFilePath}" (content not inspected)`);
+        validatedCodeEvidence = {
+          filePath: rawFilePath,
+          targetIdentifier: rawIdent,
+          codeSnippet: rawSnippet,
+          isVerified: false,
+          explanation: rawCeExp,
+        };
       } else {
         const fileContent = inspected.contentExcerpt;
         let snippetFound = true;
@@ -197,6 +204,14 @@ export function validateInvestigationFinding(
             codeSnippet: rawSnippet,
             derivedLineNumber,
             isVerified: true,
+            explanation: rawCeExp,
+          };
+        } else {
+          validatedCodeEvidence = {
+            filePath: inspected.path,
+            targetIdentifier: rawIdent,
+            codeSnippet: rawSnippet,
+            isVerified: false,
             explanation: rawCeExp,
           };
         }

@@ -1,16 +1,28 @@
-import { categorizeFile, prioritizeFilesForInspection } from './fileFilter.ts';
+import { categorizeFile, prioritizeFilesForInspection, identifyUnsupportedFileTypes } from './fileFilter.ts';
+import {
+  clearScannerCache,
+  getCachedRepository,
+  getScannerCacheStats,
+  redactSecrets,
+  setCachedRepository,
+} from './cache.ts';
 import type {
+  EvidenceCoverage,
   GitHubRepoMetadata,
   GitHubScanOptions,
   GitHubScanResult,
   GitTreeEntry,
   InspectedFile,
+  ParseFailure,
   RateLimitInfo,
   ScanStage,
 } from './types.ts';
 import { validateGitHubUrl } from './url.ts';
 import { fetchCommitCheckRuns, evaluateCheckRunsForVerification } from '../lifecycle/ciEvaluator.ts';
 import type { GitHubCheckRun } from '../lifecycle/types.ts';
+import { buildCodeIndex } from '../codeIndex/index.ts';
+
+export { clearScannerCache, getScannerCacheStats, redactSecrets };
 
 function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
   const limitHeader = headers.get('x-ratelimit-limit');
@@ -41,6 +53,18 @@ function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
   return undefined;
 }
 
+function createTimeoutSignal(timeoutMs: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+    (timer as { unref: () => void }).unref();
+  }
+  return controller.signal;
+}
+
 export async function scanGitHubRepository(
   rawUrl: string,
   options: GitHubScanOptions = {},
@@ -48,8 +72,21 @@ export async function scanGitHubRepository(
 ): Promise<GitHubScanResult> {
   const startTime = Date.now();
   const fetchFn = options.fetchFn || fetch;
-  const maxFiles = options.maxFilesToInspect ?? 12;
+  const maxFiles = Math.min(40, Math.max(1, options.maxFilesToInspect ?? 25));
+  const maxFileSizeBytes = options.maxFileSizeBytes ?? 80 * 1024;
+  const totalScanBudgetBytes = options.totalScanBudgetBytes ?? 160 * 1024;
+  const timeoutMs = options.timeoutMs ?? 10000;
+  const token = options.githubToken || (typeof process !== 'undefined' && process.env ? process.env.GITHUB_TOKEN : undefined);
+  const useCache = options.useCache !== false;
   const warnings: string[] = [];
+
+  const baseHeaders: Record<string, string> = {
+    Accept: 'application/vnd.github.v3+json',
+    'User-Agent': 'TheLivingBlueprint-Scanner',
+  };
+  if (token && token.trim().length > 0) {
+    baseHeaders['Authorization'] = `Bearer ${token.trim()}`;
+  }
 
   onProgress?.('validating', 'Validating GitHub repository URL...');
 
@@ -68,7 +105,7 @@ export async function scanGitHubRepository(
       detectedManifests: [],
       detectedArchitecturalLayers: [],
       warnings: [],
-      error: validation.error,
+      error: redactSecrets(validation.error || 'Invalid URL', token),
       durationMs: Date.now() - startTime,
     };
   }
@@ -80,16 +117,16 @@ export async function scanGitHubRepository(
 
   let metadata: GitHubRepoMetadata | undefined;
   let rateLimit: RateLimitInfo | undefined;
+  let metaEtag: string | undefined;
 
   try {
     const metaRes = await fetchFn(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'TheLivingBlueprint-Scanner',
-      },
+      headers: baseHeaders,
+      signal: createTimeoutSignal(timeoutMs),
     });
 
     rateLimit = parseRateLimitHeaders(metaRes.headers);
+    metaEtag = metaRes.headers.get('etag') || undefined;
 
     if (metaRes.status === 404) {
       return {
@@ -111,7 +148,7 @@ export async function scanGitHubRepository(
       };
     }
 
-    if (metaRes.status === 403) {
+    if (metaRes.status === 403 || metaRes.status === 429) {
       let resetMsg = '';
       if (rateLimit) {
         const resetDate = new Date(rateLimit.resetDate);
@@ -132,7 +169,7 @@ export async function scanGitHubRepository(
         detectedArchitecturalLayers: [],
         rateLimit,
         warnings,
-        error: `GitHub API rate limit exceeded (unauthenticated limit is 60 requests/hr).${resetMsg}`,
+        error: redactSecrets(`GitHub API rate limit exceeded (unauthenticated limit is 60 requests/hr).${resetMsg}`, token),
         durationMs: Date.now() - startTime,
       };
     }
@@ -152,7 +189,7 @@ export async function scanGitHubRepository(
         detectedArchitecturalLayers: [],
         rateLimit,
         warnings,
-        error: `GitHub API returned error HTTP ${metaRes.status}: ${metaRes.statusText}`,
+        error: redactSecrets(`GitHub API returned error HTTP ${metaRes.status}: ${metaRes.statusText}`, token),
         durationMs: Date.now() - startTime,
       };
     }
@@ -206,33 +243,139 @@ export async function scanGitHubRepository(
       detectedArchitecturalLayers: [],
       rateLimit,
       warnings,
-      error: `Failed to reach GitHub API: ${errorMsg}`,
+      error: redactSecrets(`Failed to reach GitHub API: ${errorMsg}`, token),
       durationMs: Date.now() - startTime,
     };
   }
 
-  // 2. Fetch Git Recursive Tree
+  // 2. Determine Scanned Commit SHA
+  let commitSha: string | undefined;
+  try {
+    const commitRes = await fetchFn(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${metadata.defaultBranch}`,
+      {
+        headers: baseHeaders,
+        signal: createTimeoutSignal(timeoutMs),
+      }
+    );
+    if (commitRes.ok) {
+      const commitData = await commitRes.json();
+      if (commitData && typeof commitData.sha === 'string') {
+        commitSha = commitData.sha;
+      }
+    }
+  } catch {
+    // Non-fatal if unmocked or network issue
+  }
+
+  // 3. Fetch Git Recursive Tree (checks immutable commit cache first)
   onProgress?.('fetching_tree', `Retrieving file tree for branch '${metadata.defaultBranch}'...`);
 
   let treeEntries: GitTreeEntry[] = [];
   let isTruncated = false;
+  const subtreesFetched: string[] = [];
+  let isFromCache = false;
 
-  try {
-    const treeRes = await fetchFn(
-      `https://api.github.com/repos/${owner}/${repo}/git/trees/${metadata.defaultBranch}?recursive=1`,
-      {
-        headers: {
-          Accept: 'application/vnd.github.v3+json',
-          'User-Agent': 'TheLivingBlueprint-Scanner',
-        },
+  const cachedRecord = useCache && commitSha ? getCachedRepository(owner, repo, commitSha) : undefined;
+  if (cachedRecord && cachedRecord.treeEntries.length > 0) {
+    treeEntries = cachedRecord.treeEntries;
+    isTruncated = cachedRecord.treeTruncated;
+    if (cachedRecord.subtreesFetched) {
+      subtreesFetched.push(...cachedRecord.subtreesFetched);
+    }
+    isFromCache = true;
+    warnings.push('Served from immutable commit cache.');
+  } else {
+    try {
+      const treeRes = await fetchFn(
+        `https://api.github.com/repos/${owner}/${repo}/git/trees/${metadata.defaultBranch}?recursive=1`,
+        {
+          headers: baseHeaders,
+          signal: createTimeoutSignal(timeoutMs),
+        }
+      );
+
+      const treeRateLimit = parseRateLimitHeaders(treeRes.headers);
+      if (treeRateLimit) rateLimit = treeRateLimit;
+
+      if (!treeRes.ok) {
+        warnings.push(`Could not retrieve recursive git tree (HTTP ${treeRes.status}).`);
+        return {
+          success: false,
+          status: 'failed',
+          owner,
+          repo,
+          metadata,
+          treeTruncated: false,
+          totalFilesDiscovered: 0,
+          inspectedFiles: [],
+          skippedFiles: [],
+          detectedTechnologies: [],
+          detectedManifests: [],
+          detectedArchitecturalLayers: [],
+          rateLimit,
+          warnings,
+          error: redactSecrets(`Could not retrieve git tree: HTTP ${treeRes.status} ${treeRes.statusText}`, token),
+          durationMs: Date.now() - startTime,
+        };
       }
-    );
 
-    const treeRateLimit = parseRateLimitHeaders(treeRes.headers);
-    if (treeRateLimit) rateLimit = treeRateLimit;
+      const treeJson = await treeRes.json();
+      treeEntries = Array.isArray(treeJson.tree) ? treeJson.tree : [];
+      isTruncated = Boolean(treeJson.truncated);
 
-    if (!treeRes.ok) {
-      warnings.push(`Could not retrieve recursive git tree (HTTP ${treeRes.status}).`);
+      // 3b. Handle Truncation with Targeted Subtree Traversal
+      if (isTruncated) {
+        const priorityRoots = ['src', 'app', 'lib', 'packages', 'api', 'routes', 'test', 'tests', 'internal'];
+        const candidateTrees = treeEntries.filter(
+          (e) => e.type === 'tree' && priorityRoots.includes(e.path.toLowerCase())
+        );
+
+        for (const dirNode of candidateTrees.slice(0, 2)) {
+          try {
+            const subRes = await fetchFn(
+              `https://api.github.com/repos/${owner}/${repo}/git/trees/${dirNode.sha}?recursive=1`,
+              {
+                headers: baseHeaders,
+                signal: createTimeoutSignal(timeoutMs),
+              }
+            );
+            if (subRes.ok) {
+              const subJson = await subRes.json();
+              if (Array.isArray(subJson.tree)) {
+                const existingPaths = new Set(treeEntries.map((e) => e.path));
+                for (const item of subJson.tree) {
+                  const fullPath = `${dirNode.path}/${item.path}`;
+                  if (!existingPaths.has(fullPath)) {
+                    treeEntries.push({
+                      path: fullPath,
+                      mode: item.mode,
+                      type: item.type,
+                      sha: item.sha,
+                      size: item.size,
+                      url: item.url,
+                    });
+                    existingPaths.add(fullPath);
+                  }
+                }
+                subtreesFetched.push(dirNode.path);
+              }
+            }
+          } catch {
+            // Subtree fetch is non-fatal recovery
+          }
+        }
+
+        warnings.push(
+          `Git tree was truncated by GitHub API (repository contains >100,000 files or tree exceeded 7MB). ${
+            subtreesFetched.length > 0
+              ? `Targeted subtree traversal explored: ${subtreesFetched.join(', ')}. `
+              : ''
+          }Architecture discovery is based on partial tree.`
+        );
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Git tree fetch error';
       return {
         success: false,
         status: 'failed',
@@ -248,62 +391,10 @@ export async function scanGitHubRepository(
         detectedArchitecturalLayers: [],
         rateLimit,
         warnings,
-        error: `Could not retrieve git tree: HTTP ${treeRes.status} ${treeRes.statusText}`,
+        error: redactSecrets(`Failed to fetch git tree: ${errorMsg}`, token),
         durationMs: Date.now() - startTime,
       };
     }
-
-    const treeJson = await treeRes.json();
-    treeEntries = Array.isArray(treeJson.tree) ? treeJson.tree : [];
-    isTruncated = Boolean(treeJson.truncated);
-
-    if (isTruncated) {
-      warnings.push(
-        'Git tree was truncated by GitHub API (repository contains >100,000 files or tree exceeded 7MB). Architecture discovery is based on partial tree.'
-      );
-    }
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Git tree fetch error';
-    return {
-      success: false,
-      status: 'failed',
-      owner,
-      repo,
-      metadata,
-      treeTruncated: false,
-      totalFilesDiscovered: 0,
-      inspectedFiles: [],
-      skippedFiles: [],
-      detectedTechnologies: [],
-      detectedManifests: [],
-      detectedArchitecturalLayers: [],
-      rateLimit,
-      warnings,
-      error: `Failed to fetch git tree: ${errorMsg}`,
-      durationMs: Date.now() - startTime,
-    };
-  }
-
-  // 3. Determine Scanned Commit SHA
-  let commitSha: string | undefined;
-  try {
-    const commitRes = await fetchFn(
-      `https://api.github.com/repos/${owner}/${repo}/commits/${metadata.defaultBranch}`,
-      {
-        headers: {
-          Accept: 'application/vnd.github.v3+json',
-          'User-Agent': 'TheLivingBlueprint-Scanner',
-        },
-      }
-    );
-    if (commitRes.ok) {
-      const commitData = await commitRes.json();
-      if (commitData && typeof commitData.sha === 'string') {
-        commitSha = commitData.sha;
-      }
-    }
-  } catch {
-    // Non-fatal if unmocked or network issue
   }
 
   if (!commitSha && treeEntries.length > 0) {
@@ -342,8 +433,8 @@ export async function scanGitHubRepository(
     new Date().toISOString()
   );
 
-  // 5. Filter and Prioritize Candidate Files (up to maxFiles)
-  const { candidates, skipped } = prioritizeFilesForInspection(treeEntries, maxFiles);
+  // 5. Filter and Prioritize Candidate Files
+  const { candidates, skipped } = prioritizeFilesForInspection(treeEntries, maxFiles, maxFileSizeBytes);
 
   onProgress?.(
     'inspecting_files',
@@ -351,15 +442,22 @@ export async function scanGitHubRepository(
   );
 
   const inspectedFiles: InspectedFile[] = [];
+  const parseFailures: ParseFailure[] = [];
+  const fileContentCache = new Map<string, string>();
   const detectedTechnologies = new Set<string>();
   const detectedManifests: string[] = [];
 
-  // Technology detector heuristics from file paths
+  for (const entry of treeEntries) {
+    if (categorizeFile(entry.path) === 'manifest' && !detectedManifests.includes(entry.path)) {
+      detectedManifests.push(entry.path);
+    }
+  }
+
   for (const entry of treeEntries) {
     const lower = entry.path.toLowerCase();
     if (lower.endsWith('.ts') || lower.endsWith('.tsx')) detectedTechnologies.add('TypeScript');
     if (lower.endsWith('.js') || lower.endsWith('.jsx')) detectedTechnologies.add('JavaScript');
-    if (lower.endsWith('.py')) detectedTechnologies.add('Python');
+    if (lower.endsWith('.py') || lower.endsWith('pyproject.toml') || lower.endsWith('requirements.txt')) detectedTechnologies.add('Python');
     if (lower.endsWith('.rs')) detectedTechnologies.add('Rust');
     if (lower.endsWith('.go')) detectedTechnologies.add('Go');
     if (lower.endsWith('.java')) detectedTechnologies.add('Java');
@@ -367,32 +465,63 @@ export async function scanGitHubRepository(
     if (lower.includes('.github/workflows/')) detectedTechnologies.add('GitHub Actions');
   }
 
-  // Fetch excerpts for candidate files
+  // 6. Inspect Candidate Files with Total Content Byte Budget Enforcement
+  let totalContentBytesInspected = 0;
+  let byteBudgetExceeded = false;
+
   for (const candidate of candidates) {
-    const category = categorizeFile(candidate.path);
-    if (category === 'manifest') {
-      detectedManifests.push(candidate.path);
+    if (byteBudgetExceeded || totalContentBytesInspected >= totalScanBudgetBytes) {
+      byteBudgetExceeded = true;
+      skipped.push({ path: candidate.path, reason: 'scan_byte_budget_exceeded' });
+      continue;
     }
 
+    const category = categorizeFile(candidate.path);
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${metadata.defaultBranch}/${candidate.path}`;
     const githubUrl = `https://github.com/${owner}/${repo}/blob/${metadata.defaultBranch}/${candidate.path}`;
 
-    try {
-      const fileRes = await fetchFn(rawUrl, {
-        headers: { 'User-Agent': 'TheLivingBlueprint-Scanner' },
-      });
+    const cachedText = cachedRecord?.fileContents.get(candidate.path);
+    let text: string;
 
-      if (fileRes.ok) {
-        const text = await fileRes.text();
-        const excerpt = text.slice(0, 3000); // Bounded excerpt
-        inspectedFiles.push({
-          path: candidate.path,
-          category,
-          sizeBytes: candidate.size ?? text.length,
-          contentExcerpt: excerpt,
-          rawUrl,
-          githubUrl,
+    if (useCache && cachedText !== undefined) {
+      text = cachedText;
+    } else {
+      try {
+        const fileRes = await fetchFn(rawUrl, {
+          headers: baseHeaders,
+          signal: createTimeoutSignal(timeoutMs),
         });
+
+        if (fileRes.ok) {
+          text = await fileRes.text();
+        } else {
+          warnings.push(`File "${candidate.path}" could not be inspected (HTTP ${fileRes.status}).`);
+          skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
+          continue;
+        }
+      } catch (err: unknown) {
+        const fetchErr = err instanceof Error ? err.message : 'Network error';
+        warnings.push(`Failed to download "${candidate.path}": ${fetchErr}`);
+        skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
+        continue;
+      }
+    }
+
+    const remainingBudget = totalScanBudgetBytes - totalContentBytesInspected;
+    const excerptLimit = Math.min(3000, remainingBudget);
+    const excerpt = text.slice(0, excerptLimit);
+
+    totalContentBytesInspected += text.length;
+    fileContentCache.set(candidate.path, text);
+
+    inspectedFiles.push({
+      path: candidate.path,
+      category,
+      sizeBytes: candidate.size ?? text.length,
+      contentExcerpt: excerpt,
+      rawUrl,
+      githubUrl,
+    });
 
         // Scan manifest content for dependencies
         if (candidate.path.endsWith('package.json')) {
@@ -405,27 +534,91 @@ export async function scanGitHubRepository(
             if (allDeps.jest) detectedTechnologies.add('Jest');
             if (allDeps.vitest) detectedTechnologies.add('Vitest');
             if (allDeps.tailwindcss) detectedTechnologies.add('Tailwind CSS');
-            if (allDeps.pg || allDeps['@prisma/client'] || allDeps.typeorm) detectedTechnologies.add('PostgreSQL / SQL');
-          } catch {
-            // Ignore parse errors on malformed manifests
+            if (allDeps.pg || allDeps['@prisma/client'] || allDeps.typeorm || allDeps.sqlite3) detectedTechnologies.add('PostgreSQL / SQL');
+          } catch (err: unknown) {
+            const parseErr = err instanceof Error ? err.message : 'Invalid JSON syntax in package.json';
+            parseFailures.push({ path: candidate.path, error: parseErr });
+            warnings.push(`Manifest parse failure in "${candidate.path}": ${parseErr}`);
           }
+        } else if (candidate.path.endsWith('pyproject.toml') || candidate.path.endsWith('requirements.txt')) {
+          const lowerText = text.toLowerCase();
+          detectedTechnologies.add('Python');
+          if (lowerText.includes('fastapi')) detectedTechnologies.add('FastAPI');
+          if (lowerText.includes('flask')) detectedTechnologies.add('Flask');
+          if (lowerText.includes('django')) detectedTechnologies.add('Django');
+          if (lowerText.includes('pytest')) detectedTechnologies.add('Pytest');
+          if (lowerText.includes('sqlalchemy') || lowerText.includes('sqlite') || lowerText.includes('psycopg')) detectedTechnologies.add('PostgreSQL / SQL');
         }
-      } else {
-        skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
-        warnings.push(`File "${candidate.path}" could not be inspected (HTTP ${fileRes.status}).`);
-      }
-    } catch {
-      skipped.push({ path: candidate.path, reason: 'content_fetch_failed' });
-      warnings.push(`File "${candidate.path}" could not be inspected due to network error.`);
-    }
+  }
+
+  // 7. Store In-Memory Cache for Immutable Commit SHA
+  if (useCache && commitSha && inspectedFiles.length > 0) {
+    setCachedRepository({
+      owner,
+      repo,
+      commitSha,
+      metadata,
+      treeEntries,
+      treeTruncated: isTruncated,
+      subtreesFetched,
+      checkRuns,
+      fileContents: fileContentCache,
+      parseFailures,
+      unsupportedFileTypes: identifyUnsupportedFileTypes(treeEntries),
+      etag: metaEtag,
+      cachedAt: Date.now(),
+    });
   }
 
   onProgress?.('mapping_architecture', 'Mapping discovered files to architecture domains...');
 
-  const isPartial = isTruncated || skipped.length > 0;
+  const isPartial = isTruncated || skipped.length > 0 || parseFailures.length > 0;
   const status = isPartial ? 'partial' : 'completed';
 
+  const discoveredCount = treeEntries.length;
+  const inspectedCount = inspectedFiles.length;
+  const skippedCount = skipped.length;
+  const coverageRatio = discoveredCount > 0 ? Number((inspectedCount / discoveredCount).toFixed(4)) : 1;
+
+  const evidenceCoverage: EvidenceCoverage = {
+    discoveredCount,
+    inspectedCount,
+    skippedCount,
+    coverageRatio,
+  };
+
+  const unsupportedFileTypes = identifyUnsupportedFileTypes(treeEntries);
+
+  // Determine coverage improvement feasibility
+  const fileBudgetSkipped = skipped.filter((s) => s.reason === 'scan_file_budget_exceeded').length;
+  const byteBudgetSkipped = skipped.filter((s) => s.reason === 'scan_byte_budget_exceeded').length;
+  const fetchFailedSkipped = skipped.filter((s) => s.reason === 'content_fetch_failed').length;
+
+  const coverageImprovementPossible =
+    isTruncated || fileBudgetSkipped > 0 || byteBudgetSkipped > 0 || fetchFailedSkipped > 0;
+
+  let coverageImprovementReason: string | undefined;
+  if (coverageImprovementPossible) {
+    const reasons: string[] = [];
+    if (isTruncated) reasons.push('Git tree was truncated by GitHub API (>100k files/7MB limit)');
+    if (fileBudgetSkipped > 0) reasons.push(`${fileBudgetSkipped} candidate file(s) omitted due to file budget limit (${maxFiles} max)`);
+    if (byteBudgetSkipped > 0) reasons.push(`${byteBudgetSkipped} file(s) omitted due to total scan byte budget limit (${Math.round(totalScanBudgetBytes / 1024)} KB)`);
+    if (fetchFailedSkipped > 0) reasons.push(`${fetchFailedSkipped} file(s) failed to download`);
+    coverageImprovementReason = `${reasons.join('; ')}. Expanding scan budget or targeting subtrees could improve grounding confidence.`;
+  } else {
+    coverageImprovementReason = 'All discovered candidate files were inspected within budget. Full repository tree explored.';
+  }
+
   onProgress?.('completed', `Scan complete: ${inspectedFiles.length} files inspected.`);
+
+  const filesForIndexing: Record<string, string> = {};
+  for (const [p, content] of fileContentCache.entries()) {
+    filesForIndexing[p] = content;
+  }
+  const codeIndex = buildCodeIndex({
+    repositorySha: commitSha || 'unknown',
+    files: filesForIndexing,
+  });
 
   return {
     success: true,
@@ -437,16 +630,27 @@ export async function scanGitHubRepository(
     scannedAt: new Date().toISOString(),
     checkRuns,
     ciEvaluation,
+    codeIndex,
     treeTruncated: isTruncated,
+    subtreesFetched: subtreesFetched.length > 0 ? subtreesFetched : undefined,
     totalFilesDiscovered: treeEntries.length,
     discoveredFilePaths: treeEntries.map((e) => e.path),
     inspectedFiles,
     skippedFiles: skipped,
+    parseFailures,
+    evidenceCoverage,
+    unsupportedFileTypes,
+    coverageImprovementPossible,
+    coverageImprovementReason,
+    cached: isFromCache,
+    totalContentBytesInspected,
+    scanFileBudget: maxFiles,
+    scanByteBudget: totalScanBudgetBytes,
     detectedTechnologies: Array.from(detectedTechnologies).sort(),
     detectedManifests,
     detectedArchitecturalLayers: ['foundation', 'core', 'service', 'gateway'],
     rateLimit,
-    warnings,
+    warnings: warnings.map((w) => redactSecrets(w, token)),
     durationMs: Date.now() - startTime,
   };
 }

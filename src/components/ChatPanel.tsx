@@ -1,7 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PixelPetAvatar } from './PixelPetAvatar.tsx';
+import { WorkflowDiagramView } from './WorkflowDiagramView.tsx';
+import { AiUsageLimitNotice } from './AiUsageLimitNotice.tsx';
 import type { ArchitecturalRoom } from '../types.ts';
-import type { CompanionReplyMessage, CompanionSpeaker } from '../server/types.ts';
+import type {
+  CompanionReplyMessage,
+  CompanionSpeaker,
+  ExecutionTimingMetadata,
+  ExplanationLevel,
+  WorkflowDiagram,
+  AiErrorInfo,
+} from '../server/types.ts';
 import type { GitHubScanResult } from '../domain/github/types.ts';
 
 export interface ChatMessageItem {
@@ -10,6 +19,9 @@ export interface ChatMessageItem {
   text: string;
   timestamp: string;
   evidenceReference?: string;
+  timing?: ExecutionTimingMetadata;
+  workflowDiagram?: WorkflowDiagram;
+  providerUsed?: 'gemini' | 'groq';
 }
 
 interface ChatPanelProps {
@@ -19,6 +31,7 @@ interface ChatPanelProps {
   rooms: ArchitecturalRoom[];
   initialMessages?: ChatMessageItem[];
   onMessagesChange?: (messages: ChatMessageItem[]) => void;
+  onSelectRoom?: (roomId: string) => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -28,6 +41,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   rooms,
   initialMessages,
   onMessagesChange,
+  onSelectRoom,
 }) => {
   const [messages, setMessages] = useState<ChatMessageItem[]>(() => {
     if (initialMessages && initialMessages.length > 0) {
@@ -37,13 +51,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       {
         id: 'init-dog',
         sender: 'dog',
-        text: "Woof! I'm Barkley! Ask me anything about this repository's architecture, dependencies, or the rooms in the house!",
+        text: "Hi! I'm here to help you understand this project's architecture, follow data flows through each room, and make sense of the scanned code.",
         timestamp: 'Ready',
       },
       {
         id: 'init-cat',
         sender: 'cat',
-        text: "And I'm Cleo. I keep Barkley honest. I only accept real verified tests and evidence.",
+        text: "And I'm Cleo. I review the claims against actual source files and CI check runs, so we don't guess.",
         timestamp: 'Ready',
       },
     ];
@@ -65,8 +79,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             id: `reset-dog-${Date.now()}`,
             sender: 'dog',
             text: isSampleActive
-              ? "Woof! Switched to sample BookNook repository. Previous conversation cleared."
-              : `Woof! Switched project to ${currentProjectKey}. Previous conversation cleared. Ask me anything about this repository's architecture!`,
+              ? "Switched to sample BookNook repository. Previous conversation cleared. Let's explore its architecture together!"
+              : `Switched project to ${currentProjectKey}. Previous conversation cleared. Ask me anything about how this codebase is structured!`,
             timestamp: 'Reset',
           },
           {
@@ -82,6 +96,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         onMessagesChange?.(resetMessages);
       }
       setErrorMessage(null);
+      setErrorInfo(null);
       setSetupRequired(false);
     }
   }, [currentProjectKey, isSampleActive, initialMessages, onMessagesChange]);
@@ -91,10 +106,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     onMessagesChange?.(newMsgs);
   };
 
+  const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('beginner');
   const [inputVal, setInputVal] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorInfo, setErrorInfo] = useState<AiErrorInfo | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -103,12 +121,78 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
+  // Generate adaptive contextual suggestion chips
+  const suggestionChips: Array<{ label: string; query: string }> = [];
+
+  if (selectedRoom) {
+    suggestionChips.push({
+      label: `Explain how ${selectedRoom.name} works`,
+      query: `Explain how ${selectedRoom.name} works: what are its primary responsibilities and patterns?`,
+    });
+    suggestionChips.push({
+      label: `What happens when a user sends a request?`,
+      query: `What happens when a user sends a request to ${selectedRoom.name}? Trace the path step by step.`,
+    });
+    suggestionChips.push({
+      label: `Why does this module depend on that one?`,
+      query: `Why does ${selectedRoom.name} depend on other modules? Explain the coupling and separation of concerns.`,
+    });
+    suggestionChips.push({
+      label: `Explain functions step by step`,
+      query: `Explain the key functions in ${selectedRoom.name} step by step based on the inspected code.`,
+    });
+    suggestionChips.push({
+      label: `What happens if this component fails?`,
+      query: `What happens if ${selectedRoom.name} fails or throws an unhandled error? What is the blast radius?`,
+    });
+    suggestionChips.push({
+      label: `Show me a workflow diagram`,
+      query: `Show me a workflow diagram of ${selectedRoom.name}.`,
+    });
+  } else {
+    suggestionChips.push({
+      label: `Explain how this project works`,
+      query: `Explain how this project works. How does the architecture hang together across layers?`,
+    });
+    suggestionChips.push({
+      label: `What happens when a user sends a request?`,
+      query: `What happens when a user sends a request? Trace the flow step by step from client to storage.`,
+    });
+    suggestionChips.push({
+      label: `Why does this module depend on that one?`,
+      query: `Why does this module depend on that one? Explain the coupling and architectural boundaries.`,
+    });
+    suggestionChips.push({
+      label: `Explain this function step by step`,
+      query: `Explain the main entry point and core function step by step from the inspected source files.`,
+    });
+    suggestionChips.push({
+      label: `What happens if this component fails?`,
+      query: `What happens if a core component fails or encounters an unhandled exception?`,
+    });
+    suggestionChips.push({
+      label: `What can this application actually do?`,
+      query: `What can this application actually do, and what are its current architectural limitations?`,
+    });
+    suggestionChips.push({
+      label: `Show me a workflow diagram`,
+      query: `Show me a workflow diagram of the main request and data flow.`,
+    });
+  }
+
+  suggestionChips.push({
+    label: `💡 What can you help me understand?`,
+    query: `What can you help me understand about this codebase and The Living Blueprint?`,
+  });
+
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
+  const isSendingRef = useRef(false);
 
   const handleSendMessage = async (textToSend: string, isRetry = false) => {
     const trimmed = textToSend.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed || isLoading || isSendingRef.current) return;
 
+    isSendingRef.current = true;
     let newMessages = messages;
     let currentMessageId = '';
 
@@ -130,6 +214,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     setIsLoading(true);
     setErrorMessage(null);
+    setErrorInfo(null);
     const requestProjectKey = currentProjectKey;
 
     // Build context payload from current scan / sample state
@@ -229,6 +314,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: trimmed,
+          explanationLevel,
           history: historyPayload,
           selectedRoomId: selectedRoom?.id,
           repoContext,
@@ -247,6 +333,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           setSetupRequired(true);
         } else {
           setErrorMessage(data.error || 'Failed to communicate with AI provider.');
+          setErrorInfo(data.errorInfo || null);
           setFailedMessage(trimmed);
         }
         return;
@@ -260,20 +347,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         text: r.text,
         evidenceReference: r.evidenceReference,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timing: idx === companionReplies.length - 1 ? data.timing : undefined,
+        workflowDiagram: r.workflowDiagram || (idx === 0 ? data.workflowDiagram : undefined),
+        providerUsed: data.providerUsed,
       }));
 
       const updatedMessages = [...newMessages, ...replyItems];
       updateAndNotifyMessages(updatedMessages);
       setFailedMessage(null);
+      setErrorInfo(null);
     } catch (err: unknown) {
       if (prevProjectKeyRef.current !== requestProjectKey) {
         return;
       }
       const msg = err instanceof Error ? err.message : 'Network failure';
       setErrorMessage(`Request failed: ${msg}. You can retry.`);
+      setErrorInfo({
+        kind: 'network_error',
+        title: 'Network connection issue',
+        message: 'Unable to reach the AI provider network. Please check your internet connection.',
+        retryable: true,
+        proHint: false,
+      });
       setFailedMessage(trimmed);
     } finally {
       setIsLoading(false);
+      isSendingRef.current = false;
     }
   };
 
@@ -294,6 +393,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       },
     ]);
     setErrorMessage(null);
+    setErrorInfo(null);
   };
 
   return (
@@ -312,6 +412,33 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </div>
         </div>
         <div className="chat-panel-subheading">One model · Two distinct personalities</div>
+
+        {/* Compact explanation level selector */}
+        <div className="chat-level-selector" role="radiogroup" aria-label="Explanation level">
+          <span className="level-selector-label">Level:</span>
+          {(['beginner', 'intermediate', 'technical'] as const).map((lvl) => (
+            <button
+              key={lvl}
+              type="button"
+              role="radio"
+              aria-checked={explanationLevel === lvl}
+              className={`btn-level-chip ${explanationLevel === lvl ? 'active-level' : ''}`}
+              onClick={() => setExplanationLevel(lvl)}
+              title={`Switch explanation mode to ${lvl}`}
+            >
+              {lvl.charAt(0).toUpperCase() + lvl.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="btn-help-capabilities"
+          onClick={() => setShowHelpModal(true)}
+          title="Learn about The Living Blueprint's educational capabilities, architecture, and honest limitations"
+        >
+          💡 What can you help me understand?
+        </button>
       </div>
 
       {/* Setup notification if API key is not configured */}
@@ -381,6 +508,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     Ref: <code>{msg.evidenceReference}</code>
                   </div>
                 )}
+                {msg.workflowDiagram && (
+                  <WorkflowDiagramView
+                    diagram={msg.workflowDiagram}
+                    rooms={rooms}
+                    codeIndex={scanResult?.codeIndex}
+                    onSelectRoom={onSelectRoom}
+                  />
+                )}
+                {msg.timing && (
+                  <div
+                    className="companion-timing-badge"
+                    title={`End-to-end: ${msg.timing.totalMs}ms | Provider: ${msg.timing.provider || msg.timing.providerUsed || 'gemini'} (${msg.timing.upstreamMs}ms) | Context: ${msg.timing.contextPrepMs}ms | Tokens: ${msg.timing.totalTokens ?? 'n/a'}`}
+                  >
+                    {(msg.timing.fallbackUsed || msg.timing.provider === 'groq' || msg.timing.providerUsed === 'groq') && (
+                      <span className="backup-ai-indicator" title="Generated by Groq backup AI">🛡️ Using backup AI · </span>
+                    )}
+                    ⚡ {msg.timing.totalMs}ms (model: {msg.timing.upstreamMs}ms)
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -398,42 +544,54 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <span className="typing-dot" />
               <span className="typing-dot" />
             </div>
+            <span className="typing-status-hint">Consulting Barkley & Cleo (waiting for Gemini)...</span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Error Banner */}
-      {errorMessage && (
-        <div className="chat-error-toast" role="alert">
-          <span className="chat-error-text">⚠️ {errorMessage}</span>
-          {failedMessage && !setupRequired && (
-            <button
-              type="button"
-              className="btn-retry-chat"
-              onClick={() => handleSendMessage(failedMessage, true)}
-              disabled={isLoading}
-              title="Retry sending this message"
-            >
-              Retry
-            </button>
-          )}
-          <button
-            type="button"
-            className="error-dismiss-btn"
-            onClick={() => {
-              setErrorMessage(null);
-              setFailedMessage(null);
-            }}
-          >
-            ✕
-          </button>
-        </div>
+      {/* Error or Rate-Limit Usage Notice */}
+      {(errorMessage || errorInfo) && !setupRequired && (
+        <AiUsageLimitNotice
+          errorInfo={errorInfo}
+          errorMessage={errorMessage}
+          onRetry={failedMessage ? () => handleSendMessage(failedMessage, true) : undefined}
+          onDismiss={() => {
+            setErrorMessage(null);
+            setErrorInfo(null);
+            setFailedMessage(null);
+          }}
+          isLoading={isLoading}
+          onExploreRoom={selectedRoom && onSelectRoom ? () => onSelectRoom(selectedRoom.id) : undefined}
+          onViewEvidence={selectedRoom && onSelectRoom ? () => onSelectRoom(selectedRoom.id) : undefined}
+          hasSelectedRoom={Boolean(selectedRoom)}
+          selectedRoomName={selectedRoom?.name}
+          contextType="chat"
+        />
       )}
 
       {/* Interactive Input Footer Area */}
       <div className="chat-input-area">
+        {/* Contextual Educational Suggestion Chips */}
+        <div className="chat-suggestions-bar" role="group" aria-label="Educational prompt suggestions">
+          <span className="suggestions-label">Suggestions:</span>
+          <div className="suggestions-scroll">
+            {suggestionChips.map((chip, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="btn-suggestion-chip"
+                onClick={() => handleSendMessage(chip.query)}
+                disabled={isLoading}
+                title={chip.query}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <textarea
           ref={textareaRef}
           className="chat-input-box active-chat"
@@ -469,6 +627,72 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Educational Capabilities & Limitations Modal */}
+      {showHelpModal && (
+        <div
+          className="workflow-modal-backdrop"
+          onClick={() => setShowHelpModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="The Living Blueprint Capabilities and Limitations"
+        >
+          <div className="workflow-modal-window help-capabilities-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="diagram-header-bar">
+              <div className="diagram-title-group">
+                <span className="diagram-icon">🏛️</span>
+                <h4 className="diagram-title">The Living Blueprint — Capabilities & Boundaries</h4>
+              </div>
+              <button
+                type="button"
+                className="btn-diagram-expand"
+                onClick={() => setShowHelpModal(false)}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="capabilities-body">
+              <section className="cap-section">
+                <h5>✅ What The Living Blueprint Does</h5>
+                <ul>
+                  <li><strong>Repository Ingestion:</strong> Discovers git tree structure, manifests, source, tests, and configuration without modifying your code.</li>
+                  <li><strong>Dynamic Isometric House:</strong> Generates a living architectural house model mapping code into Foundation, Storage, Services, API Gateway, Presentation, and CI layers.</li>
+                  <li><strong>Deterministic Status Engine:</strong> Computes room statuses (<code>Planned</code>, <code>Implemented</code>, <code>Verified</code>, <code>Blocked</code>, <code>Unknown</code>) strictly from verified evidence.</li>
+                  <li><strong>CI Verification & Retest Supersession:</strong> Classifies real GitHub Check Runs and supersedes prior test failures when new runs pass.</li>
+                  <li><strong>Room Investigations:</strong> Uses Gemini to inspect excerpts, diagnose defects, and provide copy-ready repair prompts.</li>
+                  <li><strong>Static Workflow Walkthroughs:</strong> Simulates step-by-step code-derived data flow through architectural layers for students.</li>
+                </ul>
+              </section>
+
+              <section className="cap-section limitations-section">
+                <h5>⚠️ Constraints & Honest Limitations</h5>
+                <ul>
+                  <li><strong>Static Source Inspection:</strong> The tool statically inspects file excerpts; it does NOT execute arbitrary remote code or provide a sandbox runner.</li>
+                  <li><strong>Bounded File Scope:</strong> To stay fast and avoid rate limits, only architectural files are inspected. Uninspected files are explicitly flagged.</li>
+                  <li><strong>Static Simulations:</strong> Workflow diagrams model static code structure and static data flow, NOT live runtime traces.</li>
+                  <li><strong>GitHub API Limits:</strong> Public unauthenticated access is subject to GitHub rate limits and tree size constraints.</li>
+                  <li><strong>Read-Only Guarantee:</strong> The Living Blueprint never modifies, writes, or pushes commits to your repository.</li>
+                  <li><strong>Live AI Credentials:</strong> Live companion dialogue requires a configured <code>GEMINI_API_KEY</code>.</li>
+                </ul>
+              </section>
+
+              <div className="cap-modal-footer">
+                <button
+                  type="button"
+                  className="btn-ask-companion-help"
+                  onClick={() => {
+                    setShowHelpModal(false);
+                    handleSendMessage("What can you help me understand about this codebase and The Living Blueprint?");
+                  }}
+                >
+                  Ask Barkley & Cleo in Chat →
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 };

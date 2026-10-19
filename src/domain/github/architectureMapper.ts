@@ -112,7 +112,7 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
     (f) =>
       !testFiles.includes(f) &&
       !serverFiles.includes(f) &&
-      (/(?:validation|validator|rules|schema)\.(?:js|ts|mjs|cjs|py)$/i.test(f.path) ||
+      (/(?:validation|validators?|rules?|schemas?)\.(?:js|ts|mjs|cjs|py)$/i.test(f.path) ||
         /(?:^|\/)(?:validation|validators|schemas)\//i.test(f.path))
   );
 
@@ -126,7 +126,7 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
   const dbFiles = inspectedFiles.filter(
     (f) =>
       !testFiles.includes(f) &&
-      /(?:schema\.prisma|migrations\/|typeorm|database\.sqlite|database\.js|db\.js|store\.sqlite)/i.test(f.path)
+      /(?:schema\.prisma|migrations?\/|typeorm|alembic\/|prisma\/|(?:database|db|models?|repository)\.(?:js|ts|mjs|cjs|py|go|rs|sqlite|sql)|database\.sqlite|store\.sqlite)/i.test(f.path)
   );
 
   const uiFiles = inspectedFiles.filter(
@@ -152,15 +152,34 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
       !classified.has(f.path)
   );
 
-  // Group remaining source files by domain folder (e.g. src/tasks/... -> 'tasks')
+  // Non-domain directory identifiers that should not be converted into business domain rooms
+  const NON_DOMAIN_FOLDERS = new Set(['src', 'lib', 'app', 'config', 'configs', 'generated', 'gen', 'docs', 'examples', 'dist', 'build', 'core']);
+
+  // Group remaining source files by domain folder (e.g. src/tasks/... -> 'tasks', packages/shared/... -> 'shared')
   const domainFolders = new Map<string, InspectedFile[]>();
   for (const f of remainingSource) {
-    if (f.category === 'manifest' || f.category === 'readme') continue;
-    const match = f.path.match(/(?:src\/|^)([a-zA-Z0-9_-]+)\//i);
-    const folder = match ? match[1].toLowerCase() : 'core';
-    const list = domainFolders.get(folder) || [];
-    list.push(f);
-    domainFolders.set(folder, list);
+    if (f.category === 'manifest' || f.category === 'readme' || f.category === 'documentation') continue;
+    const monorepoMatch = f.path.match(/(?:packages|apps|services|modules)\/([a-zA-Z0-9_-]+)\/src\/([a-zA-Z0-9_-]+)\//i);
+    const monorepoPkgMatch = f.path.match(/(?:packages|apps|services|modules)\/([a-zA-Z0-9_-]+)\//i);
+    const srcSubMatch = f.path.match(/(?:src|lib|app)\/([a-zA-Z0-9_-]+)\//i);
+    const topMatch = f.path.match(/^([a-zA-Z0-9_-]+)\//i);
+
+    let folder = 'core';
+    if (monorepoMatch && !NON_DOMAIN_FOLDERS.has(monorepoMatch[2].toLowerCase())) {
+      folder = monorepoMatch[2].toLowerCase();
+    } else if (monorepoPkgMatch && !NON_DOMAIN_FOLDERS.has(monorepoPkgMatch[1].toLowerCase())) {
+      folder = monorepoPkgMatch[1].toLowerCase();
+    } else if (srcSubMatch && !NON_DOMAIN_FOLDERS.has(srcSubMatch[1].toLowerCase())) {
+      folder = srcSubMatch[1].toLowerCase();
+    } else if (topMatch && !NON_DOMAIN_FOLDERS.has(topMatch[1].toLowerCase())) {
+      folder = topMatch[1].toLowerCase();
+    }
+
+    if (folder !== 'core') {
+      const list = domainFolders.get(folder) || [];
+      list.push(f);
+      domainFolders.set(folder, list);
+    }
   }
 
   // 2. Build Modules and Module File Mappings
@@ -332,6 +351,16 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
           targetRequirementId: 'req-gw-ci',
         });
       }
+    } else {
+      const discoveredTests = allPaths.filter((p) => /(?:^|\/)(?:test|tests|__tests__|spec)\/|\.(?:test|spec)\.[a-z0-9]+$/i.test(p));
+      ev.push({
+        id: 'ev-test-files-uninspected',
+        sourceType: 'source_code',
+        description: `Test suite files discovered in tree (${discoveredTests.slice(0, 3).join(', ')}), but content was not inspected within scan budget. Automated test execution has not been verified.`,
+        timestamp,
+        reference: discoveredTests[0] || 'tests',
+        targetRequirementId: 'req-gw-ci',
+      });
     }
 
     // Real CI Verification Evidence from Scanned Commit Check Runs
@@ -386,6 +415,7 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
       requirements: reqs,
       evidenceHistory: ev,
     });
+    moduleFileMap.set('room-core', src ? [src] : []);
   }
 
   // 3. Derive Evidence-Backed Inter-Module Dependencies
@@ -519,7 +549,7 @@ export function mapScanResultToHouse(scan: GitHubScanResult): {
       dependencies: roomDeps,
       metrics: {
         testFilesCount: isTestRoom ? testFiles.length : undefined,
-        filesCount: modFiles.length || scan.inspectedFiles.length,
+        filesCount: modFiles.length,
         ciStatus,
         ciCheckName,
         ciUrl,

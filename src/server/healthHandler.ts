@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { DEFAULT_GROQ_MODEL } from './aiProviderRunner.ts';
 
 export async function handleHealthApiRequest(
   req: IncomingMessage,
@@ -12,8 +13,13 @@ export async function handleHealthApiRequest(
     return;
   }
 
-  const hasApiKey = Boolean(env.GEMINI_API_KEY && env.GEMINI_API_KEY.trim().length > 0);
+  const hasGemini = Boolean(
+    (env.GEMINI_API_KEY || env.GOOGLE_GENAI_API_KEY || env.AI_API_KEY)?.trim()
+  );
+  const hasGroq = Boolean(env.GROQ_API_KEY?.trim());
+  const hasApiKey = hasGemini || hasGroq;
   const configuredModel = env.AI_MODEL || 'gemini-3.8-flash';
+  const fallbackModel = env.GROQ_MODEL || DEFAULT_GROQ_MODEL;
 
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
@@ -24,6 +30,9 @@ export async function handleHealthApiRequest(
       timestamp: new Date().toISOString(),
       aiConfigured: hasApiKey,
       model: configuredModel,
+      geminiConfigured: hasGemini,
+      groqConfigured: hasGroq,
+      fallbackModel,
     })
   );
 }

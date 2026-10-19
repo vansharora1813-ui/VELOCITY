@@ -37,6 +37,7 @@ const BINARY_EXTENSIONS = new Set([
   'zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'wasm', 'mp4', 'mov', 'webm',
   'woff', 'woff2', 'ttf', 'otf', 'eot', 'exe', 'dll', 'dylib', 'so',
   'min.js', 'min.css', 'map', 'pyc', 'class', 'jar', 'o', 'a',
+  'bin', 'dat',
 ]);
 
 const MANIFEST_NAMES = new Set([
@@ -44,6 +45,7 @@ const MANIFEST_NAMES = new Set([
   'cargo.toml',
   'pyproject.toml',
   'requirements.txt',
+  'pipfile',
   'go.mod',
   'pom.xml',
   'build.gradle',
@@ -116,13 +118,117 @@ export function isFileIgnored(path: string): { ignored: boolean; reason?: Skippe
 }
 
 /**
- * Prioritizes discovered tree entries for bounded source-code reading (up to maxFiles).
+ * Scores a repository file path according to architectural importance for bounded scanning.
+ * Favors manifests, entry points, routes, schemas/models, CI workflows, and tests.
+ * Deprioritizes generated, minified, and vendored code.
+ */
+export function scoreFileForInspection(path: string): number {
+  const lower = path.toLowerCase();
+  const basename = lower.split('/').pop() || '';
+  const category = categorizeFile(path);
+
+  // 1. Deprioritize minified, generated, and vendored files
+  if (basename.includes('.min.') || basename.endsWith('.min.js') || basename.endsWith('.min.css')) return 5;
+  if (lower.includes('/vendor/') || lower.startsWith('vendor/')) return 5;
+  if (lower.includes('/generated/') || lower.startsWith('generated/') || lower.includes('.generated.')) return 10;
+  if (lower.includes('/gen/') || lower.startsWith('gen/')) return 10;
+
+  // 2. Primary manifests
+  if (category === 'manifest') {
+    return lower.includes('/') ? 95 : 100;
+  }
+
+  // 3. Root README
+  if (category === 'readme' && !lower.includes('/')) {
+    return 92;
+  }
+
+  // 4. Core entry points
+  if (
+    basename.startsWith('index.') ||
+    basename.startsWith('main.') ||
+    basename.startsWith('app.') ||
+    basename.startsWith('server.') ||
+    basename.startsWith('cli.') ||
+    basename === 'manage.py'
+  ) {
+    return 90;
+  }
+
+  // 5. Route handlers and controllers
+  if (
+    /(?:^|\/)(?:routes|controllers|endpoints|api|handlers)\//i.test(lower) ||
+    /(?:route|controller|endpoint|router)\.(?:ts|js|py|go|rs)$/i.test(basename)
+  ) {
+    return 85;
+  }
+
+  // 6. Core business logic, schemas, and models
+  if (
+    /(?:^|\/)(?:schemas?|models?|entities|domain|services?|store)\//i.test(lower) ||
+    /(?:schema|model|entity|service|repository)\.(?:ts|js|py|go|rs|prisma|sql)$/i.test(basename)
+  ) {
+    return 82;
+  }
+
+  // 7. CI Workflows
+  if (lower.includes('.github/workflows/')) {
+    return 78;
+  }
+
+  // 8. Representative tests
+  if (category === 'test') {
+    return 75;
+  }
+
+  // 9. Key infrastructure and configuration
+  if (
+    category === 'config' &&
+    (basename.startsWith('dockerfile') ||
+      basename.includes('docker-compose') ||
+      basename === 'tsconfig.json' ||
+      basename.includes('.config.'))
+  ) {
+    return 70;
+  }
+
+  // 10. General configuration and source
+  if (category === 'source') return 50;
+  if (category === 'config') return 45;
+  if (category === 'readme' || category === 'documentation') return 30;
+
+  return 20;
+}
+
+/**
+ * Identifies unsupported or non-source file extensions present in the repository tree.
+ */
+export function identifyUnsupportedFileTypes(tree: GitTreeEntry[]): string[] {
+  const unsupportedExts = new Set<string>();
+
+  for (const entry of tree) {
+    if (entry.type !== 'blob') continue;
+    const parts = entry.path.toLowerCase().split('.');
+    if (parts.length > 1) {
+      const ext = parts.pop()!;
+      if (BINARY_EXTENSIONS.has(ext)) {
+        unsupportedExts.add(ext);
+      }
+    }
+  }
+
+  return Array.from(unsupportedExts).sort();
+}
+
+/**
+ * Prioritizes discovered tree entries for bounded source-code reading (up to maxFiles, clamped at 40).
  */
 export function prioritizeFilesForInspection(
   tree: GitTreeEntry[],
-  maxFiles = 12,
+  maxFiles = 25,
   maxSizeBytes = 80 * 1024
 ): { candidates: GitTreeEntry[]; skipped: SkippedFile[] } {
+  const boundedMaxFiles = Math.min(40, Math.max(1, maxFiles));
   const skipped: SkippedFile[] = [];
   const validBlobs: GitTreeEntry[] = [];
 
@@ -145,35 +251,10 @@ export function prioritizeFilesForInspection(
     validBlobs.push(entry);
   }
 
-  // Rank by architectural importance:
-  // 1: Primary manifests (package.json, pyproject.toml, Cargo.toml)
-  // 2: Root README
-  // 3: Key infrastructure / config (Dockerfile, docker-compose, CI)
-  // 4: Core entrypoints & routing (index, main, app, server, api)
-  // 5: Representative test files
-  // 6: Other source files
-  const scoreEntry = (entry: GitTreeEntry): number => {
-    const lower = entry.path.toLowerCase();
-    const basename = lower.split('/').pop() || '';
-    const category = categorizeFile(entry.path);
+  validBlobs.sort((a, b) => scoreFileForInspection(b.path) - scoreFileForInspection(a.path));
 
-    if (category === 'manifest' && !lower.includes('/')) return 100;
-    if (category === 'manifest') return 90;
-    if (category === 'readme' && !lower.includes('/')) return 85;
-    if (category === 'config' && (basename.startsWith('dockerfile') || basename.includes('docker-compose'))) return 80;
-    if (category === 'config' && lower.includes('.github/workflows/')) return 75;
-    if (basename.startsWith('index.') || basename.startsWith('main.') || basename.startsWith('app.')) return 70;
-    if (lower.includes('route') || lower.includes('controller') || lower.includes('service') || lower.includes('auth')) return 65;
-    if (category === 'test') return 60;
-    if (category === 'config') return 50;
-    if (category === 'source') return 40;
-    return 10;
-  };
-
-  validBlobs.sort((a, b) => scoreEntry(b) - scoreEntry(a));
-
-  const candidates = validBlobs.slice(0, maxFiles);
-  const remaining = validBlobs.slice(maxFiles);
+  const candidates = validBlobs.slice(0, boundedMaxFiles);
+  const remaining = validBlobs.slice(boundedMaxFiles);
 
   for (const rem of remaining) {
     skipped.push({ path: rem.path, reason: 'scan_file_budget_exceeded' });
@@ -181,3 +262,4 @@ export function prioritizeFilesForInspection(
 
   return { candidates, skipped };
 }
+

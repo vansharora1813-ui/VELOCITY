@@ -421,6 +421,13 @@ export const App: React.FC = () => {
               onFindingChange={handleFindingChange}
               savedLifecycleState={selectedRoom ? fixLifecyclesByRoomId[selectedRoom.id] : undefined}
               onLifecycleChange={handleLifecycleChange}
+              allRooms={rooms}
+              onSelectRoom={(roomId) => {
+                const targetRoom = rooms.find((r) => r.id === roomId);
+                if (targetRoom) {
+                  handleSelectRoom(targetRoom);
+                }
+              }}
             />
           </div>
         </section>
@@ -433,6 +440,12 @@ export const App: React.FC = () => {
           rooms={rooms}
           initialMessages={chatMessages}
           onMessagesChange={handleChatMessagesChange}
+          onSelectRoom={(roomId) => {
+            const targetRoom = rooms.find((r) => r.id === roomId);
+            if (targetRoom) {
+              handleSelectRoom(targetRoom);
+            }
+          }}
         />
       </main>
 

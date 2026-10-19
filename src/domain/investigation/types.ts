@@ -1,4 +1,4 @@
-import type { CompanionReplyMessage } from '../../server/types.ts';
+import type { CompanionReplyMessage, ExecutionTimingMetadata, AiErrorInfo } from '../../server/types.ts';
 
 export type IssueCategory =
   | 'missing_proof'
@@ -47,6 +47,10 @@ export interface RoomInvestigationFinding {
   uncertainties: string;
   companionMessages: CompanionReplyMessage[];
   generatedPrompt?: string;
+  timing?: ExecutionTimingMetadata;
+  providerUsed?: 'gemini' | 'groq';
+  provider?: 'gemini' | 'groq';
+  fallbackUsed?: boolean;
 }
 
 export interface InvestigateApiRequest {
@@ -85,4 +89,9 @@ export interface InvestigateApiResponse {
   finding?: RoomInvestigationFinding;
   error?: string;
   code?: 'CONFIG_REQUIRED' | 'RATE_LIMITED' | 'PROVIDER_ERROR' | 'INVALID_REQUEST';
+  errorInfo?: AiErrorInfo;
+  timing?: ExecutionTimingMetadata;
+  providerUsed?: 'gemini' | 'groq';
+  provider?: 'gemini' | 'groq';
+  fallbackUsed?: boolean;
 }

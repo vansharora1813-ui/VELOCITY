@@ -29,19 +29,27 @@ The application will be accessible at: `http://localhost:3000`
 
 ---
 
-## 2. Server-Side Gemini Configuration & Verification
+## 2. Server-Side AI Configuration & Verification (Gemini Primary + Groq Fallback)
 
 All LLM operations are strictly server-side. Secret API keys are never bundled or exposed to client browsers.
 
 ### Environment Setup
 Create or update `.env` in the project root (never commit real credentials to source control):
 ```env
+# Primary Provider (Google Gemini)
 GEMINI_API_KEY="your-gemini-api-key-here"
 AI_MODEL="gemini-3.8-flash"
+
+# Automatic Fallback Provider (Groq)
+# Note: Groq free tier is subject to bounded RPM/TPM rate limits (not unlimited).
+GROQ_API_KEY="your-groq-api-key-here"
+GROQ_MODEL="qwen/qwen3.8-27b"
 ```
+> [!NOTE]
+> The default fallback model is `qwen/qwen3.8-27b`. The older `llama-3.3-70b-versatile` model is historically deprecated and unavailable on Groq standard free tier accounts.
 
 ### Verifying Configuration Safely (Zero Key Exposure)
-To verify whether the server detects the API key without printing or logging secret values:
+To verify whether the server detects the configured API keys without printing or logging secret values:
 ```bash
 curl -s http://localhost:3000/api/health
 ```
@@ -49,15 +57,19 @@ curl -s http://localhost:3000/api/health
 ```json
 {
   "status": "ok",
+  "service": "The Living Blueprint API",
   "timestamp": "2026-10-19T...",
   "aiConfigured": true,
-  "model": "gemini-3.8-flash"
+  "model": "gemini-3.8-flash",
+  "geminiConfigured": true,
+  "groqConfigured": true,
+  "fallbackModel": "qwen/qwen3.8-27b"
 }
 ```
 > [!IMPORTANT]
-> A response of `"aiConfigured": true` verifies that the environment variable is loaded by the server runtime. It does **not** guarantee network connectivity or quota availability with Google's upstream API until an actual request executes.
+> A response of `"aiConfigured": true` verifies that at least one AI provider key is loaded by the server runtime. It does **not** guarantee network connectivity or quota availability with upstream APIs until an actual request executes.
 
-If `aiConfigured` is `false`, repository scanning, house generation, and deterministic verification will still function normally; chat and room investigation will gracefully show setup guidance.
+If neither provider is configured, repository scanning, house generation, and deterministic verification will still function normally; chat and room investigation will gracefully show setup guidance.
 
 ---
 
@@ -105,11 +117,14 @@ The Living Blueprint is built to remain honest, resilient, and non-destructive d
    - **Skipped / Failed Reads**: Files omitted due to budget thresholds or network fetch failures.
 2. If any content reads fail, the app flags the scan as **Partial**, preserves all validly scanned evidence, and warns the user that conclusions about skipped modules remain unverified.
 
-### C. Demonstrating AI Failure Recovery
-1. If the Gemini API key is missing, invalid, or upstream rate limits (HTTP 429) occur:
-   - **Chat**: Displays an inline banner explaining that AI is unavailable, preserving the conversation history intact. An inline **Retry** button is offered for recoverable network errors without duplicating messages.
+### C. Demonstrating AI Failure Recovery & Automatic Provider Fallback
+1. **Automatic Failover to Groq**:
+   - If Gemini encounters daily quota exhaustion (HTTP 429), short-term rate limits, server overload (HTTP 503), or network timeouts, the server automatically and transparently re-routes the request to Groq using the configured model (`qwen/qwen3.8-27b`).
+   - The user interface displays a subtle backup indicator (`🛡️ Using backup AI`) alongside response times.
+2. **Graceful Handling When Neither or Both Are Exhausted**:
+   - **Chat**: If neither provider is configured or both providers encounter quota/rate limits, the chat displays an honest inline recovery banner with a retry countdown when appropriate, preserving conversation history intact.
    - **Investigation**: Fails gracefully without producing fabricated diagnostic findings or empty success cards.
-   - **Room Status Integrity**: The deterministic status engine never changes room states based on failed or ungrounded AI calls.
+   - **Room Status Integrity**: The deterministic status engine never changes room states based on failed or ungrounded AI calls. Saved architecture and evidence remain safe.
 
 ### D. Repository Switching During In-Flight Requests
 1. Start a scan or an AI investigation on one repository.

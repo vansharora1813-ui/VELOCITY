@@ -4,6 +4,7 @@
 
 import type { GitHubCheckRun } from '../lifecycle/types.ts';
 import type { EvaluateCiOutcomeResult } from '../lifecycle/ciEvaluator.ts';
+import type { CodeIndex } from '../codeIndex/types.ts';
 
 export type ScanStage =
   | 'idle'
@@ -70,7 +71,21 @@ export interface SkippedFile {
     | 'lockfile'
     | 'exceeds_file_size_limit'
     | 'scan_file_budget_exceeded'
-    | 'content_fetch_failed';
+    | 'scan_byte_budget_exceeded'
+    | 'content_fetch_failed'
+    | 'unsupported_file_type';
+}
+
+export interface ParseFailure {
+  path: string;
+  error: string;
+}
+
+export interface EvidenceCoverage {
+  discoveredCount: number;
+  inspectedCount: number;
+  skippedCount: number;
+  coverageRatio: number;
 }
 
 export interface GitHubScanOptions {
@@ -78,6 +93,9 @@ export interface GitHubScanOptions {
   maxFileSizeBytes?: number;
   totalScanBudgetBytes?: number;
   fetchFn?: typeof fetch;
+  githubToken?: string;
+  useCache?: boolean;
+  timeoutMs?: number;
 }
 
 export interface GitHubScanResult {
@@ -89,17 +107,29 @@ export interface GitHubScanResult {
   commitSha?: string;
   scannedAt?: string;
   treeTruncated: boolean;
+  subtreesFetched?: string[];
   totalFilesDiscovered: number;
   discoveredFilePaths?: string[];
   inspectedFiles: InspectedFile[];
   skippedFiles: SkippedFile[];
+  parseFailures?: ParseFailure[];
+  evidenceCoverage?: EvidenceCoverage;
+  unsupportedFileTypes?: string[];
+  coverageImprovementPossible?: boolean;
+  coverageImprovementReason?: string;
+  cached?: boolean;
+  totalContentBytesInspected?: number;
+  scanFileBudget?: number;
+  scanByteBudget?: number;
   detectedTechnologies: string[];
   detectedManifests: string[];
   detectedArchitecturalLayers: string[];
   checkRuns?: GitHubCheckRun[];
   ciEvaluation?: EvaluateCiOutcomeResult;
+  codeIndex?: CodeIndex;
   rateLimit?: RateLimitInfo;
   warnings: string[];
   error?: string;
   durationMs: number;
 }
+
