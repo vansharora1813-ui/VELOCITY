@@ -72,6 +72,22 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
     }
   };
 
+  const getStatusMeaning = (status: ArchitecturalRoom['status']) => {
+    switch (status) {
+      case 'verified':
+        return 'Relevant, current verification evidence supports the requirement.';
+      case 'implemented':
+      case 'in_progress':
+        return 'Relevant source evidence exists, but automated verification is absent or pending.';
+      case 'planned':
+        return 'Sufficient implementation evidence is absent.';
+      case 'blocked':
+        return 'Relevant unresolved failing evidence exists.';
+      case 'unknown':
+        return 'Evidence is insufficient or contradictory.';
+    }
+  };
+
   const handleInvestigate = async () => {
     setIsInvestigating(true);
     setErrorMessage(null);
@@ -232,6 +248,37 @@ export const RoomInspector: React.FC<RoomInspectorProps> = ({
         >
           ✕
         </button>
+      </div>
+
+      {/* Explanatory definition for the 5 canonical statuses */}
+      <div className="room-status-definition-banner" role="note">
+        <span className="definition-label">Status Meaning:</span> {getStatusMeaning(room.status)}
+      </div>
+
+      {/* Next Action & Unverified Scope Guidance */}
+      <div className="room-next-action-card">
+        <div className="next-action-row">
+          <span className="action-step-badge">NEXT ACTION</span>
+          <span className="next-action-text">
+            {finding
+              ? 'Review finding below, copy the repair prompt, or report fix when ready.'
+              : room.status === 'blocked'
+              ? 'Click "🔍 Investigate this room" below to diagnose the failing test and generate a repair prompt.'
+              : 'Click "🔍 Investigate this room" below to run evidence-backed diagnosis, or ask companions in chat.'}
+          </span>
+        </div>
+        {!finding && (
+          <div className="unverified-coverage-note">
+            <span className="unverified-label">Unverified scope:</span>{' '}
+            {room.status === 'blocked'
+              ? 'Active blocker detected in CI; fix must be committed and re-inspected before status can change.'
+              : room.status === 'implemented'
+              ? 'Source exists, but automated test suite or CI verification has not validated this room.'
+              : room.status === 'verified'
+              ? 'Current CI/test verification passes; no known blocker evidence.'
+              : 'Implementation details are incomplete or not yet inspected in repository scan.'}
+          </div>
+        )}
       </div>
 
       <p className="room-detail-desc">{room.description}</p>

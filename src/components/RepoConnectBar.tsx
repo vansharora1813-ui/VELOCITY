@@ -14,6 +14,7 @@ interface RepoConnectBarProps {
   onSelectRecentProject?: (id: string) => void;
   onDeleteRecentProject?: (id: string) => void;
   isSavedData?: boolean;
+  externalUrl?: string;
 }
 
 export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
@@ -27,12 +28,20 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
   onSelectRecentProject,
   onDeleteRecentProject,
   isSavedData = false,
+  externalUrl,
 }) => {
-  const [urlInput, setUrlInput] = useState('');
+  const [urlInput, setUrlInput] = useState(externalUrl || '');
   const [isScanning, setIsScanning] = useState(false);
   const [stageMessage, setStageMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [retryUrl, setRetryUrl] = useState<{ url: string; isRefresh: boolean } | null>(null);
+
+  React.useEffect(() => {
+    if (externalUrl) {
+      setUrlInput(externalUrl);
+      setErrorMessage(null);
+    }
+  }, [externalUrl]);
 
   const performScan = async (repoUrl: string, isRefresh = false) => {
     setErrorMessage(null);
@@ -127,6 +136,18 @@ export const RepoConnectBar: React.FC<RepoConnectBarProps> = ({
             disabled={isScanning}
             aria-label="Public GitHub repository URL"
           />
+          <button
+            type="button"
+            className="btn-demo-quickfill"
+            onClick={() => {
+              setUrlInput('https://github.com/sakshamgupta005/patchboard-tasks-api');
+              if (errorMessage) setErrorMessage(null);
+            }}
+            disabled={isScanning}
+            title="Pre-fill public Patchboard Tasks API demo repository"
+          >
+            Demo Repo
+          </button>
           <button
             type="submit"
             className="btn-scan"

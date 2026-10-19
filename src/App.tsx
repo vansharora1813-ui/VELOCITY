@@ -12,6 +12,9 @@ import type { ArchitecturalRoom } from './types';
 import type { RoomInvestigationFinding } from './domain/investigation/types';
 import type { FixLifecycleState } from './domain/lifecycle/types';
 import type { WorkspaceSession, WorkspaceSummary } from './domain/workspace/types';
+import { GuidedWalkthrough } from './components/GuidedWalkthrough';
+import { evaluateWalkthroughSteps } from './domain/walkthrough/walkthroughEngine';
+import type { WalkthroughStep } from './domain/walkthrough/types';
 import {
   loadWorkspace,
   saveWorkspace,
@@ -33,11 +36,25 @@ export const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
   const [findingsByRoomId, setFindingsByRoomId] = useState<Record<string, RoomInvestigationFinding>>({});
   const [fixLifecyclesByRoomId, setFixLifecyclesByRoomId] = useState<Record<string, FixLifecycleState>>({});
+  const [externalRepoUrl, setExternalRepoUrl] = useState<string>('');
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState<boolean>(true);
+  const [isAiConfigured, setIsAiConfigured] = useState<boolean>(true);
 
   const activeScanIdRef = useRef<number>(0);
 
   // Restore workspace session on initial mount
   useEffect(() => {
+    fetch('/api/health')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && typeof data.aiConfigured === 'boolean') {
+          setIsAiConfigured(data.aiConfigured);
+        }
+      })
+      .catch(() => {
+        // Fallback safely if health check endpoint fails
+      });
+
     const recents = getRecentProjects();
     setRecentProjects(recents);
 
@@ -61,6 +78,58 @@ export const App: React.FC = () => {
       }
     }
   }, []);
+
+  const walkthroughEvaluation = evaluateWalkthroughSteps({
+    isSampleActive,
+    lastScanResult,
+    selectedRoom,
+    rooms,
+    chatMessages,
+    findingsByRoomId,
+    fixLifecyclesByRoomId,
+    isAiConfigured,
+  });
+
+  const handleWalkthroughAction = (actionId: NonNullable<WalkthroughStep['actionId']>) => {
+    switch (actionId) {
+      case 'prefill_demo':
+        setExternalRepoUrl('https://github.com/sakshamgupta005/patchboard-tasks-api');
+        break;
+      case 'select_room':
+        if (rooms.length > 0) {
+          handleSelectRoom(rooms[0]);
+        }
+        break;
+      case 'focus_blocked_room': {
+        const blocked = rooms.find(
+          (r) => r.status === 'blocked' || r.metrics?.ciStatus === 'failing'
+        );
+        if (blocked) {
+          setSelectedRoom(blocked);
+        } else if (rooms.length > 0) {
+          setSelectedRoom(rooms[0]);
+        }
+        break;
+      }
+      case 'ask_chat': {
+        const targetRoom = selectedRoom || rooms[0];
+        if (targetRoom) {
+          const queryText = `Tell me about ${targetRoom.name}: what verification evidence exists and what is failing?`;
+          const newMsg: ChatMessageItem = {
+            id: `user-walkthrough-${Date.now()}`,
+            sender: 'user',
+            text: queryText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          handleChatMessagesChange([...chatMessages, newMsg]);
+        }
+        break;
+      }
+      case 'investigate':
+      case 'open_fix_report':
+        break;
+    }
+  };
 
   const handleSelectRoom = (room: ArchitecturalRoom) => {
     const nextSelected = selectedRoom?.id === room.id ? null : room;
@@ -283,6 +352,7 @@ export const App: React.FC = () => {
         onSelectRecentProject={handleSelectRecentProject}
         onDeleteRecentProject={handleDeleteRecentProject}
         isSavedData={isSavedData}
+        externalUrl={externalRepoUrl}
       />
 
       <main className="app-body">
@@ -320,6 +390,14 @@ export const App: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Compact Guided Demonstration Walkthrough */}
+          <GuidedWalkthrough
+            evaluation={walkthroughEvaluation}
+            isOpen={isWalkthroughOpen}
+            onToggleOpen={() => setIsWalkthroughOpen(!isWalkthroughOpen)}
+            onAction={handleWalkthroughAction}
+          />
 
           <div className="svg-canvas-wrapper">
             <IsometricHouse

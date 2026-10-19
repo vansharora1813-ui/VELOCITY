@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-brand">
         <div className="brand-title-row">
           <span className="brand-name">The Living Blueprint</span>
-          <span className="version-pill">v0.13.0 · Milestone T13</span>
+          <span className="version-pill">v0.15.0 · Living Blueprint</span>
         </div>
         <p className="brand-purpose">
           Evidence-backed architecture verification for AI coding agent projects
@@ -46,16 +46,36 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="header-status">
         <div
-          className={`status-badge ${isRealRepo ? (isSavedData ? 'saved-repo' : 'real-repo') : 'sample-data'}`}
+          className={`status-badge ${
+            isRealRepo
+              ? isSavedData
+                ? 'saved-repo'
+                : scanStatus === 'partial'
+                ? 'partial-repo'
+                : 'real-repo'
+              : 'sample-data'
+          }`}
           title={
             isRealRepo
               ? isSavedData
                 ? `Restored from saved scan at ${scannedAt || 'earlier session'}. Not yet refreshed against GitHub.`
+                : scanStatus === 'partial'
+                ? 'Live repository scan completed with bounded file budget (partial scan)'
                 : 'Live repository scan from GitHub REST API'
               : 'Fallback demonstration dataset'
           }
         >
-          <span className={`status-indicator-dot ${isRealRepo ? (isSavedData ? 'saved' : 'real') : 'sample'}`} />
+          <span
+            className={`status-indicator-dot ${
+              isRealRepo
+                ? isSavedData
+                  ? 'saved'
+                  : scanStatus === 'partial'
+                  ? 'partial'
+                  : 'real'
+                : 'sample'
+            }`}
+          />
           <span>
             Source: <strong>{sourceName}</strong>{' '}
             {branchName && <span className="branch-label">[{branchName}]</span>}{' '}
@@ -63,6 +83,8 @@ export const Header: React.FC<HeaderProps> = ({
             ({isRealRepo
               ? isSavedData
                 ? `Saved Scan (${formatTime(scannedAt) || 'local'} · Not refreshed)`
+                : scanStatus === 'partial'
+                ? 'Live Scan · PARTIAL (Bounded)'
                 : `Live Scan · ${scanStatus?.toUpperCase() ?? 'COMPLETED'}`
               : sourceStatusLabel})
           </span>
